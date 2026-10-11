@@ -3,7 +3,7 @@ set -euo pipefail
 
 VERSION="${1:-latest}"
 
-REPO_PATH="erqon/elevon"
+REPO_PATH="hesychia-dev/elevon"
 
 CRATE_NAME="elevon-cli"
 BIN_NAME="elevon"
