@@ -45,13 +45,13 @@ Install the agent on the target VM and the CLI on your development machine:
 ### Agent: system-wide installation
 
 ```bash
-curl -fsSL https://elevon.erqon.dev/install-agent.sh | sudo bash
+curl -fsSL https://elevon.hesychia-dev.dev/install-agent.sh | sudo bash
 ```
 
 ### CLI: current-user installation
 
 ```bash
-curl -fsSL https://elevon.erqon.dev/install-cli.sh | bash
+curl -fsSL https://elevon.hesychia-dev.dev/install-cli.sh | bash
 ```
 
 ## Configuration
@@ -61,7 +61,7 @@ routing, build context, environment, and app-specific settings:
 
 ```yaml
 name: elevon
-image: erqon/elevon
+image: hesychia-dev/elevon
 
 elevon:
   agent:
@@ -73,7 +73,7 @@ registry:
   password: $GHCR_PASSWORD
 
 routing:
-  domain: elevon.erqon.dev
+  domain: elevon.hesychia-dev.dev
   port: $PORT
   tls:
     cert: $TLS_CERT
@@ -118,7 +118,7 @@ See the installation and configuration sections above for setup details.
 ## GitHub Actions
 
 Install the Elevon CLI in GitHub Actions with
-[`erqon/setup-elevon`](https://github.com/erqon/setup-elevon).
+[`hesychia-dev/setup-elevon`](https://github.com/hesychia-dev/setup-elevon).
 
 See [`DEVELOPMENT.md`](DEVELOPMENT.md) for workspace details and development
 checks. See [`TODO.md`](TODO.md) for planned work.
