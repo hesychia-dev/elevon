@@ -45,13 +45,13 @@ Install the agent on the target VM and the CLI on your development machine:
 ### Agent: system-wide installation
 
 ```bash
-curl -fsSL https://elevon.hesychia-dev.dev/install-agent.sh | sudo bash
+curl -fsSL https://el.hesychia-dev.dev/install-agent.sh | sudo bash
 ```
 
 ### CLI: current-user installation
 
 ```bash
-curl -fsSL https://elevon.hesychia-dev.dev/install-cli.sh | bash
+curl -fsSL https://el.hesychia-dev.dev/install-cli.sh | bash
 ```
 
 ## Configuration
@@ -73,7 +73,7 @@ registry:
   password: $GHCR_PASSWORD
 
 routing:
-  domain: elevon.hesychia-dev.dev
+  domain: el.hesychia-dev.dev
   port: $PORT
   tls:
     cert: $TLS_CERT
