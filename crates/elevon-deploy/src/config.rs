@@ -166,7 +166,7 @@ impl Config {
         Ok(())
     }
 
-    fn get_selected_apps(&self, arg_apps: &[String]) -> Result<Vec<(String, AppConfig)>> {
+    pub fn get_selected_apps(&self, arg_apps: &[String]) -> Result<Vec<(String, AppConfig)>> {
         if arg_apps.is_empty() {
             if !self.apps.is_empty() {
                 return Ok(self
@@ -214,6 +214,7 @@ impl Config {
             .collect()
     }
 
+    #[tracing::instrument(name = "deploy", skip_all)]
     pub async fn run_deploy(
         &self,
         agent_client: AgentClient,
@@ -239,6 +240,7 @@ impl Config {
         Ok(())
     }
 
+    #[tracing::instrument(name = "rollback", skip_all)]
     pub async fn run_rollback(
         &self,
         agent_client: AgentClient,

@@ -212,3 +212,78 @@ pub fn prepare_apps_rollback_payload(
         deployment_ids,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use elevon_config::ElevonConfig;
+
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct FakeApi {}
+
+    #[async_trait]
+    impl DeployApi for FakeApi {
+        async fn deploy(&self, _payload: AppDeployPayload) -> Result<()> {
+            Ok(())
+        }
+
+        async fn rollback(&self, _payload: AppRollbackPayload) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_push_deploy_rejects_empty_apps() {
+        let fake = FakeApi::default();
+        let service = DeployService::new(fake);
+
+        let payload = AppDeployPayload { apps: vec![] };
+        let err = service.push_deploy(payload).await.unwrap_err();
+
+        assert!(err.to_string().contains("No apps"));
+    }
+
+    #[tokio::test]
+    async fn test_prepare_apps_deploy_payload() -> Result<()> {
+        let config = Config::from_file("templates/config.yml")?;
+
+        let registry_config = RegistryConfig {
+            server: "test".to_string(),
+            username: "test".to_string(),
+            password: "test".to_string(),
+        };
+
+        let selected_apps = config.get_selected_apps(&vec![])?;
+
+        // This is necessary for 'resolve_credentials' to succeed
+        unsafe {
+            std::env::set_var("BASE_API_URL", "test");
+            std::env::set_var("DATABASE_URL", "test");
+            std::env::set_var("TLS_CERT", "test");
+            std::env::set_var("TLS_KEY", "test");
+        }
+        
+        let payload = prepare_apps_deploy_payload(&config, &registry_config, selected_apps)?;
+
+        assert_eq!(payload.apps.len(), 1);
+        assert_eq!(payload.apps[0].name, "web");
+        assert_eq!(payload.apps[0].role, AppRole::Web);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prepare_apps_rollback_payload() -> Result<()> {
+        let config = Config::from_file("templates/config.yml")?;
+        let selected_apps = config.get_selected_apps(&vec![])?;
+
+        let payload = prepare_apps_rollback_payload(&config, selected_apps, vec![])?;
+
+        assert_eq!(payload.apps.len(), 1);
+        assert_eq!(payload.apps[0].project, "project-name");
+        assert_eq!(payload.apps[0].name, "web");
+        
+        Ok(())
+    }
+}
