@@ -9,6 +9,7 @@ bytesize = { version = "2.7.0", features = ["serde"] }
 ignore = "0.4.33"
 
 anyhow.workspace = true
+async-trait.workspace = true
 bollard.workspace = true
 clap.workspace = true
 futures-util.workspace = true

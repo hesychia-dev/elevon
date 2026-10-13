@@ -69,3 +69,23 @@ where
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_env_or_literal() -> Result<(), ConfigError> {
+        unsafe {
+            std::env::set_var("TEST_ENV", "test");
+        }
+
+        let result_1 = resolve_env_or_literal("$TEST_ENV")?;
+        let result_2 = resolve_env_or_literal("LITERAL_VALUE")?;
+
+        assert_eq!(result_1, "test");
+        assert_eq!(result_2, "LITERAL_VALUE");
+
+        Ok(())
+    }
+}
