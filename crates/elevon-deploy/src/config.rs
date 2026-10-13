@@ -14,7 +14,10 @@ use tracing_indicatif::span_ext::IndicatifSpanExt;
 use crate::{
     agent::{
         AgentClient, DeployService, prepare_apps_deploy_payload, prepare_apps_rollback_payload,
-    }, cli::AppRollbackArgs, config::{app::AppConfig, env::EnvConfig, registry::RegistryConfig}, image::progress::print_success,
+    },
+    cli::AppRollbackArgs,
+    config::{app::AppConfig, env::EnvConfig, registry::RegistryConfig},
+    image::progress::print_success,
 };
 
 #[derive(Debug, Deserialize)]

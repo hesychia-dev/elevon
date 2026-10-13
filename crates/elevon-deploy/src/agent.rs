@@ -263,7 +263,7 @@ mod tests {
             std::env::set_var("TLS_CERT", "test");
             std::env::set_var("TLS_KEY", "test");
         }
-        
+
         let payload = prepare_apps_deploy_payload(&config, &registry_config, selected_apps)?;
 
         assert_eq!(payload.apps.len(), 1);
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(payload.apps.len(), 1);
         assert_eq!(payload.apps[0].project, "project-name");
         assert_eq!(payload.apps[0].name, "web");
-        
+
         Ok(())
     }
 }
