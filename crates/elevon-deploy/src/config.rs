@@ -14,9 +14,7 @@ use tracing_indicatif::span_ext::IndicatifSpanExt;
 use crate::{
     agent::{
         AgentClient, DeployService, prepare_apps_deploy_payload, prepare_apps_rollback_payload,
-    },
-    cli::AppRollbackArgs,
-    config::{app::AppConfig, env::EnvConfig, registry::RegistryConfig},
+    }, cli::AppRollbackArgs, config::{app::AppConfig, env::EnvConfig, registry::RegistryConfig}, image::progress::print_success,
 };
 
 #[derive(Debug, Deserialize)]
@@ -236,6 +234,8 @@ impl Config {
         let deploy_service = DeployService::new(agent_client);
         deploy_service.push_deploy(payload).await?;
 
+        print_success(&format!("Deployed {}", self.name));
+
         Ok(())
     }
 
@@ -254,6 +254,8 @@ impl Config {
 
         let deploy_service = DeployService::new(agent_client);
         deploy_service.push_rollback(payload).await?;
+
+        print_success(&format!("Rolled back {}", self.name));
 
         Ok(())
     }
