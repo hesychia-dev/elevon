@@ -72,16 +72,11 @@ pub async fn run_deploy_cli(
         }
         Commands::Deploy(args) => {
             config
-                .run_deploy(
-                    &agent_client,
-                    &args.apps,
-                    registry_credentials,
-                    &config_path,
-                )
+                .run_deploy(agent_client, &args.apps, registry_credentials, &config_path)
                 .await?;
         }
         Commands::Rollback(args) => {
-            config.run_rollback(&agent_client, args).await?;
+            config.run_rollback(agent_client, args).await?;
         }
         Commands::Agent { command } => {
             command.handle(agent_client, config).await?;

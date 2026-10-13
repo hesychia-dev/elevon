@@ -9,9 +9,12 @@ use anyhow::Result;
 use elevon_config::{ConfigError, ElevonConfig, ResolveEnvCredentials, resolve_env_or_literal};
 use elevon_contracts::deploy::{AppRole, TlsConfig};
 use serde::Deserialize;
+use tracing_indicatif::span_ext::IndicatifSpanExt;
 
 use crate::{
-    agent::AgentClient,
+    agent::{
+        AgentClient, DeployService, prepare_apps_deploy_payload, prepare_apps_rollback_payload,
+    },
     cli::AppRollbackArgs,
     config::{app::AppConfig, env::EnvConfig, registry::RegistryConfig},
 };
@@ -129,7 +132,7 @@ impl Config {
 
     pub fn prepare_project_env_vars(
         &self,
-        registry_config: RegistryConfig,
+        registry_config: &RegistryConfig,
     ) -> Result<HashMap<String, String>> {
         let mut vars = self
             .env
@@ -215,29 +218,43 @@ impl Config {
 
     pub async fn run_deploy(
         &self,
-        agent_client: &AgentClient,
+        agent_client: AgentClient,
         app_names: &[String],
         registry_config: RegistryConfig,
         config_path: &str,
     ) -> Result<()> {
-        let selected = self.get_selected_apps(app_names)?;
+        let selected_apps = self.get_selected_apps(app_names)?;
 
         self.run_build(&registry_config, config_path, true).await?;
 
-        agent_client
-            .push_deploy(self, selected, registry_config)
-            .await?;
+        let app_names: Vec<_> = selected_apps.iter().map(|(key, _)| key).collect();
+        tracing::Span::current().pb_set_message(&format!("deploying {}", self.name));
+        tracing::info!("Deploying apps: {:?}", app_names);
+
+        let payload = prepare_apps_deploy_payload(self, &registry_config, selected_apps)?;
+
+        let deploy_service = DeployService::new(agent_client);
+        deploy_service.push_deploy(payload).await?;
 
         Ok(())
     }
 
     pub async fn run_rollback(
         &self,
-        agent_client: &AgentClient,
+        agent_client: AgentClient,
         args: AppRollbackArgs,
     ) -> Result<()> {
-        let selected = self.get_selected_apps(&args.apps)?;
-        agent_client.push_rollback(self, selected, args.ids).await?;
+        let selected_apps = self.get_selected_apps(&args.apps)?;
+
+        let app_names: Vec<_> = selected_apps.iter().map(|(key, _)| key).collect();
+        tracing::Span::current().pb_set_message(&format!("rolling back {}", self.name));
+        tracing::info!("Rolling back apps: {:?}", app_names);
+
+        let payload = prepare_apps_rollback_payload(self, selected_apps, args.ids)?;
+
+        let deploy_service = DeployService::new(agent_client);
+        deploy_service.push_rollback(payload).await?;
+
         Ok(())
     }
 }
