@@ -215,21 +215,37 @@ pub fn prepare_apps_rollback_payload(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use elevon_config::ElevonConfig;
 
     use super::*;
 
     #[derive(Clone, Default)]
-    struct FakeApi {}
+    struct FakeApi {
+        pub deploy_calls: Arc<Mutex<Vec<AppDeployPayload>>>,
+        pub rollback_calls: Arc<Mutex<Vec<AppRollbackPayload>>>,
+    }
 
     #[async_trait]
     impl DeployApi for FakeApi {
-        async fn deploy(&self, _payload: AppDeployPayload) -> Result<()> {
+        async fn deploy(&self, payload: AppDeployPayload) -> Result<()> {
+            self.deploy_calls.lock().unwrap().push(payload);
             Ok(())
         }
 
-        async fn rollback(&self, _payload: AppRollbackPayload) -> Result<()> {
+        async fn rollback(&self, payload: AppRollbackPayload) -> Result<()> {
+            self.rollback_calls.lock().unwrap().push(payload);
             Ok(())
+        }
+    }
+
+    fn set_config_env_variables() {
+        unsafe {
+            std::env::set_var("BASE_API_URL", "test");
+            std::env::set_var("DATABASE_URL", "test");
+            std::env::set_var("TLS_CERT", "test");
+            std::env::set_var("TLS_KEY", "test");
         }
     }
 
@@ -247,6 +263,7 @@ mod tests {
     #[tokio::test]
     async fn test_prepare_apps_deploy_payload() -> Result<()> {
         let config = Config::from_file("templates/config.yml")?;
+        let selected_apps = config.get_selected_apps(&vec![])?;
 
         let registry_config = RegistryConfig {
             server: "test".to_string(),
@@ -254,16 +271,7 @@ mod tests {
             password: "test".to_string(),
         };
 
-        let selected_apps = config.get_selected_apps(&vec![])?;
-
-        // This is necessary for 'resolve_credentials' to succeed
-        unsafe {
-            std::env::set_var("BASE_API_URL", "test");
-            std::env::set_var("DATABASE_URL", "test");
-            std::env::set_var("TLS_CERT", "test");
-            std::env::set_var("TLS_KEY", "test");
-        }
-
+        set_config_env_variables();
         let payload = prepare_apps_deploy_payload(&config, &registry_config, selected_apps)?;
 
         assert_eq!(payload.apps.len(), 1);
@@ -283,6 +291,53 @@ mod tests {
         assert_eq!(payload.apps.len(), 1);
         assert_eq!(payload.apps[0].project, "project-name");
         assert_eq!(payload.apps[0].name, "web");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_app_deploy_with_template_config() -> Result<()> {
+        let config = Config::from_file("templates/config.yml")?;
+        let selected_apps = config.get_selected_apps(&vec![])?;
+
+        let registry_config = RegistryConfig {
+            server: "test".to_string(),
+            username: "test".to_string(),
+            password: "test".to_string(),
+        };
+
+        set_config_env_variables();
+        let payload = prepare_apps_deploy_payload(&config, &registry_config, selected_apps)?;
+
+        let fake = FakeApi::default();
+        let service = DeployService::new(fake);
+
+        service.push_deploy(payload).await?;
+
+        assert_eq!(
+            service.api.deploy_calls.lock().unwrap()[0].apps[0].name,
+            "web"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_app_rollback_with_template_config() -> Result<()> {
+        let config = Config::from_file("templates/config.yml")?;
+        let selected_apps = config.get_selected_apps(&vec![])?;
+
+        let payload = prepare_apps_rollback_payload(&config, selected_apps, vec![])?;
+
+        let fake = FakeApi::default();
+        let service = DeployService::new(fake);
+
+        service.push_rollback(payload).await?;
+
+        assert_eq!(
+            service.api.rollback_calls.lock().unwrap()[0].apps[0].name,
+            "web"
+        );
 
         Ok(())
     }
