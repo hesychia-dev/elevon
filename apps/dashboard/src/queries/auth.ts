@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getCurrentUserFn } from "@/actions/auth.functions.ts";
+import { getCurrentUserFn } from "@/actions/auth.functions";
 import { queryKeys } from "./keys.ts";
 
 export const userQueryOptions = queryOptions({

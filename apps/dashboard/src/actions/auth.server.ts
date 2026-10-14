@@ -5,7 +5,7 @@ export const setSessionCookie = (token: string) => {
     path: "/",
     httpOnly: true,
     sameSite: "lax",
-    secure: Deno.env.get("DENO_ENV") === "production",
+    secure: process.env.NODE_ENV === "production",
   });
 };
 
