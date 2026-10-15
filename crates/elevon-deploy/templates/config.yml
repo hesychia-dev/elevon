@@ -62,6 +62,7 @@ env:
 #       retries: 3
 #       stabilization: 5  # The number of seconds deployment waits until the container is considered as healthy
 #       required_successes: 1
+#       path: /health
 #   worker:
 #     role: worker
 #     cmd: "deno run worker.ts"
