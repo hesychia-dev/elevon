@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn test_prepare_apps_deploy_payload() -> Result<()> {
         let config = Config::from_file("templates/config.yml")?;
-        let selected_apps = config.get_selected_apps(&vec![])?;
+        let selected_apps = config.get_selected_apps(&[])?;
 
         let registry_config = RegistryConfig {
             server: "test".to_string(),
@@ -284,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn test_prepare_apps_rollback_payload() -> Result<()> {
         let config = Config::from_file("templates/config.yml")?;
-        let selected_apps = config.get_selected_apps(&vec![])?;
+        let selected_apps = config.get_selected_apps(&[])?;
 
         let payload = prepare_apps_rollback_payload(&config, selected_apps, vec![])?;
 
@@ -298,7 +298,7 @@ mod tests {
     #[tokio::test]
     async fn test_app_deploy_with_template_config() -> Result<()> {
         let config = Config::from_file("templates/config.yml")?;
-        let selected_apps = config.get_selected_apps(&vec![])?;
+        let selected_apps = config.get_selected_apps(&[])?;
 
         let registry_config = RegistryConfig {
             server: "test".to_string(),
@@ -325,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn test_app_rollback_with_template_config() -> Result<()> {
         let config = Config::from_file("templates/config.yml")?;
-        let selected_apps = config.get_selected_apps(&vec![])?;
+        let selected_apps = config.get_selected_apps(&[])?;
 
         let payload = prepare_apps_rollback_payload(&config, selected_apps, vec![])?;
 
