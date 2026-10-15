@@ -125,25 +125,25 @@ pub fn lock_action() -> anyhow::Result<std::fs::File> {
 
 #[async_trait]
 pub trait OptionLoggerExt {
-    async fn log_event(&self, input: LogInput, level: StreamLogLevel) -> Result<()>;
+    async fn log_event(&self, input: LogInput) -> Result<()>;
 }
 
 #[async_trait]
 impl OptionLoggerExt for Option<&(dyn ActionLogger + Send + Sync)> {
-    async fn log_event(&self, input: LogInput, level: StreamLogLevel) -> Result<()> {
+    async fn log_event(&self, input: LogInput) -> Result<()> {
         if let Some(logger) = self {
             logger.log(input).await?;
         } else {
-            let msg = match input {
+            let (level, msg) = match input {
                 LogInput::Event(event) => match event {
-                    StreamEvent::Log { level: _, message } => Some(message),
-                    StreamEvent::Error { message } => Some(message),
-                    _ => None,
+                    StreamEvent::Log { level, message } => (Some(level), Some(message)),
+                    StreamEvent::Error { message } => (Some(StreamLogLevel::Error), Some(message)),
+                    _ => (None, None),
                 },
-                LogInput::Message(msg) => Some(msg),
+                LogInput::Message(msg) => (Some(StreamLogLevel::Info), Some(msg)),
             };
 
-            if let Some(msg) = msg {
+            if let (Some(level), Some(msg)) = (level, msg) {
                 match level {
                     StreamLogLevel::Info => tracing::info!(%msg),
                     StreamLogLevel::Warn => tracing::warn!(%msg),

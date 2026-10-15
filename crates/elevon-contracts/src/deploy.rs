@@ -37,6 +37,13 @@ impl StreamEvent {
             message: message.into(),
         }
     }
+
+    pub fn warn(message: impl Into<String>) -> Self {
+        Self::Log {
+            level: StreamLogLevel::Warn,
+            message: message.into(),
+        }
+    }
 }
 
 pub async fn log_stream_events<S>(mut event_stream: S) -> anyhow::Result<()>
