@@ -103,7 +103,7 @@ pub async fn handle_app_stop(
         let active_deployment = Deployment::get_latest_deployment(&mut db, &app.id).await?;
         let Some(active_deployment) = active_deployment else {
             logger
-                .log(format!("App '{}' is not running, skipping", app.name))
+                .log(format!("App '{}' is not running, skipping", app.name).into())
                 .await?;
             continue;
         };
@@ -113,17 +113,14 @@ pub async fn handle_app_stop(
                 .log(format!(
                     "App '{}' is running and cant be stopped without being forced, use --force to force  it",
                     app.name
-                ))
+                ).into())
                 .await?;
             continue;
         }
 
         let Some(container_id) = active_deployment.container_id.clone() else {
             logger
-                .log(format!(
-                    "App '{}' doesn't have valid container id",
-                    app.name
-                ))
+                .log(format!("App '{}' doesn't have valid container id", app.name).into())
                 .await?;
             continue;
         };
@@ -141,14 +138,17 @@ pub async fn handle_app_stop(
 
         if web_app.is_some() {
             logger
-                .log(format!(
-                    "App '{}' was marked to be drained and will be stopped soon",
-                    app.name
-                ))
+                .log(
+                    format!(
+                        "App '{}' was marked to be drained and will be stopped soon",
+                        app.name
+                    )
+                    .into(),
+                )
                 .await?;
         } else {
             logger
-                .log(format!("App '{}' was stopped", app.name))
+                .log(format!("App '{}' was stopped", app.name).into())
                 .await?;
         }
     }

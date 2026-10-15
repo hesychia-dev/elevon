@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-use bollard::plugin::{ContainerStateStatusEnum, HealthStatusEnum};
-use elevon_contracts::deploy::{StreamLogLevel, WebApp};
+use anyhow::{Context, Result};
+use bollard::plugin::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum};
+use elevon_contracts::deploy::{StreamEvent, StreamLogLevel, WebApp};
 use tokio::sync::RwLock;
 
 use crate::api::db::AgentDb;
@@ -148,22 +148,26 @@ impl ApiState {
         }
     }
 
-    async fn is_container_healthy(&self, container_id: &str) -> bool {
+    async fn is_container_healthy(&self, container_id: &str) -> Option<ContainerInspectResponse> {
         let Ok(container) = self.docker.inspect_container(container_id, None).await else {
-            return false;
+            return None;
         };
 
-        let Some(state) = container.state else {
-            return false;
+        let Some(state) = &container.state else {
+            return None;
         };
 
         if let Some(health) = &state.health
             && let Some(status) = health.status
         {
-            return matches!(
+            if matches!(
                 status,
                 HealthStatusEnum::HEALTHY | HealthStatusEnum::STARTING
-            );
+            ) {
+                return Some(container);
+            } else {
+                return None;
+            }
         }
 
         let is_running_active = matches!(
@@ -183,7 +187,11 @@ impl ApiState {
 
         let is_running_status = matches!(state.status, Some(ContainerStateStatusEnum::RUNNING));
 
-        is_running_active && is_running_status
+        if is_running_active && is_running_status {
+            Some(container)
+        } else {
+            None
+        }
     }
 
     pub async fn check_container_health(
@@ -208,25 +216,35 @@ impl ApiState {
                     .await;
 
             match check_result {
-                Ok(true) => {
+                Ok(Some(container)) => {
                     consecutive_successes += 1;
 
                     if start_time.elapsed() >= stabilization_duration
                         && consecutive_successes >= healthcheck.required_successes
                     {
+                        if !is_container_path_healthy(log_id, healthcheck, logger, &container)
+                            .await?
+                        {
+                            continue;
+                        }
+
                         logger
                             .log_event(
-                                format!("[{log_id}] Container stabilized successfully",),
+                                format!("[{log_id}] Container stabilized successfully").into(),
                                 StreamLogLevel::Info,
                             )
                             .await?;
+
                         return Ok(());
                     }
                 }
                 _ => {
                     consecutive_successes = 0;
                     logger.log_event(
-                        format!("[{log_id}] Health check failed or timed out; resetting stability counter (attempt {attempt}/{})", healthcheck.retries),
+                        format!(
+                            "[{log_id}] Health check failed or timed out; resetting stability counter (attempt {attempt}/{})",
+                            healthcheck.retries
+                        ).into(),
                         StreamLogLevel::Warn,
                     ).await?;
                 }
@@ -242,7 +260,7 @@ impl ApiState {
                 format!(
                     "[{log_id}] Container achieved stability threshold ({consecutive_successes}/{})",
                     healthcheck.required_successes
-                ),
+                ).into(),
                 StreamLogLevel::Info,
             )
             .await?;
@@ -251,7 +269,7 @@ impl ApiState {
         if let Err(err) = self.docker.stop_container(container_id, None).await {
             logger
                 .log_event(
-                    format!("[{log_id}] Failed to stop container {container_id}: {err}",),
+                    format!("[{log_id}] Failed to stop container {container_id}: {err}").into(),
                     StreamLogLevel::Warn,
                 )
                 .await?;
@@ -260,4 +278,63 @@ impl ApiState {
 
         anyhow::bail!("Container failed to pass health check")
     }
+}
+
+async fn is_container_path_healthy(
+    log_id: &str,
+    healthcheck: &DeploymentHealthCheck,
+    logger: Option<&(dyn ActionLogger + Send + Sync)>,
+    container: &ContainerInspectResponse,
+) -> Result<bool> {
+    if let Some(healthcheck_path) = &healthcheck.path {
+        if let Some(network_settings) = &container.network_settings
+            && let Some(ports) = &network_settings.ports
+        {
+            // This is a bit tricky but currently
+            // a container can be binded to one host/port, and the host is always 0.0.0.0 currently.
+            if let Some(first_port) = ports.iter().next()
+                && let Some(bindings) = first_port.1
+                && let Some(first_bind) = bindings.first()
+                && let Some(host_ip) = &first_bind.host_ip
+                && let Some(host_port) = &first_bind.host_port
+            {
+                let healthcheck_url = format!(
+                    "http://{}:{}/{}",
+                    host_ip,
+                    host_port,
+                    healthcheck_path
+                        .strip_prefix("/")
+                        .unwrap_or(healthcheck_path)
+                );
+
+                let res = reqwest::get(healthcheck_url)
+                    .await
+                    .context("healthcheck path request failed")?;
+
+                let status = res.status();
+                if status.is_server_error() || status.is_client_error() {
+                    logger
+                        .log_event(
+                            StreamEvent::Error {
+                                message: format!(
+                                    "[{log_id}] Container path healthcheck failed. status: {}",
+                                    status
+                                ),
+                            }
+                            .into(),
+                            StreamLogLevel::Error,
+                        )
+                        .await?;
+                    return Ok(false);
+                }
+            }
+        } else {
+            tracing::debug!(
+                "[{log_id}] Received healthcheck path but container network settings dont match: {:?}",
+                container.network_settings
+            );
+        }
+    }
+
+    Ok(true)
 }

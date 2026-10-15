@@ -162,23 +162,55 @@ pub struct AppDeployPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppHealthCheckConfig {
+    #[serde(default = "AppHealthCheckConfig::default_interval")]
     pub interval: u64,
+
+    #[serde(default = "AppHealthCheckConfig::default_timeout")]
     pub timeout: u64,
+
+    #[serde(default = "AppHealthCheckConfig::default_retries")]
     pub retries: u64,
+
+    #[serde(default = "AppHealthCheckConfig::default_stabilization")]
     pub stabilization: u64,
+
+    #[serde(default = "AppHealthCheckConfig::default_required_successes")]
     pub required_successes: u64,
-    pub endpoint: Option<String>,
+
+    pub path: Option<String>,
+}
+
+impl AppHealthCheckConfig {
+    fn default_interval() -> u64 {
+        5
+    }
+
+    fn default_timeout() -> u64 {
+        30
+    }
+
+    fn default_retries() -> u64 {
+        3
+    }
+
+    fn default_stabilization() -> u64 {
+        5
+    }
+
+    fn default_required_successes() -> u64 {
+        1
+    }
 }
 
 impl Default for AppHealthCheckConfig {
     fn default() -> Self {
         Self {
-            interval: 5,
-            timeout: 30,
-            retries: 3,
-            stabilization: 5,
-            required_successes: 1,
-            endpoint: None,
+            interval: AppHealthCheckConfig::default_interval(),
+            timeout: AppHealthCheckConfig::default_timeout(),
+            retries: AppHealthCheckConfig::default_retries(),
+            stabilization: AppHealthCheckConfig::default_stabilization(),
+            required_successes: AppHealthCheckConfig::default_required_successes(),
+            path: None,
         }
     }
 }

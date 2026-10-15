@@ -4,3 +4,8 @@ version = 1
 id = 5504648529021142369
 name = "20261010_063540_migration.sql"
 snapshot_name = "20261010_063540_snapshot.toml"
+
+[[migrations]]
+id = 1555092663120314804
+name = "20261014_183228_migration.sql"
+snapshot_name = "20261014_183228_snapshot.toml"
