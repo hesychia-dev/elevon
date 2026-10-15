@@ -163,8 +163,8 @@ mod tests {
                 let trimmed = line.trim_start();
                 if let Some(stripped) = trimmed.strip_prefix('#') {
                     // If there's a space after '#', strip it to preserve exact nested indentation
-                    if stripped.starts_with(' ') {
-                        &stripped[1..]
+                    if let Some(stripped_str) = stripped.strip_prefix(' ') {
+                        stripped_str
                     } else {
                         stripped
                     }
