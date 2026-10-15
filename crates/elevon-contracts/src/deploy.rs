@@ -71,9 +71,11 @@ where
                 }
 
                 match serde_json::from_str::<StreamEvent>(payload) {
-                    Ok(StreamEvent::Log { message, .. }) => {
-                        tracing::info!(message);
-                    }
+                    Ok(StreamEvent::Log { level, message }) => match level {
+                        StreamLogLevel::Info => tracing::info!(message),
+                        StreamLogLevel::Warn => tracing::warn!(message),
+                        _ => tracing::error!(message),
+                    },
                     Ok(StreamEvent::Error { message }) => {
                         tracing_indicatif::indicatif_println!("\x1b[31m✗ {message}\x1b[0m");
                     }
