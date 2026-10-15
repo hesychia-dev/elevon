@@ -232,7 +232,7 @@ pub struct DeploymentHealthCheck {
     pub retries: u64,
     pub stabilization: u64,
     pub required_successes: u64,
-    pub endpoint: Option<String>,
+    pub path: Option<String>,
 }
 
 impl Default for DeploymentHealthCheck {
@@ -250,7 +250,7 @@ impl From<&AppHealthCheckConfig> for DeploymentHealthCheck {
             retries: value.retries,
             stabilization: value.stabilization,
             required_successes: value.required_successes,
-            endpoint: value.endpoint.clone(),
+            path: value.path.clone(),
         }
     }
 }
@@ -263,7 +263,7 @@ impl From<&DeploymentHealthCheck> for AppHealthCheckConfig {
             retries: value.retries,
             stabilization: value.stabilization,
             required_successes: value.required_successes,
-            endpoint: value.endpoint.clone(),
+            path: value.path.clone(),
         }
     }
 }

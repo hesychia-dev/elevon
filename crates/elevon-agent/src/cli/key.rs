@@ -153,7 +153,9 @@ pub async fn handle_key_revoke(
             .exec(db)
             .await?;
 
-        logger.log(format!("Revoked auth key: '{key}'")).await?;
+        logger
+            .log(format!("Revoked auth key: '{key}'").into())
+            .await?;
     }
 
     Ok(())
@@ -175,7 +177,9 @@ pub async fn handle_key_delete(
             .await
             .context(format!("failed to delete key: {key}"))?;
 
-        logger.log(format!("Deleted auth key: '{key}'")).await?;
+        logger
+            .log(format!("Deleted auth key: '{key}'").into())
+            .await?;
     }
 
     Ok(())

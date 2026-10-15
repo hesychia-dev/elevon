@@ -552,8 +552,10 @@ async fn pull_image_and_run_container(
             emit(
                 tx,
                 StreamEvent::log(format!(
-                    "[{}] Checking container health",
-                    options.app_config.name
+                    "[{}] Checking container health. interval = {}, stabilization = {}",
+                    options.app_config.name,
+                    options.app_config.healthcheck.interval,
+                    options.app_config.healthcheck.stabilization
                 )),
             )
             .await;
@@ -568,23 +570,6 @@ async fn pull_image_and_run_container(
                 .await?;
 
             let deployment_status = state.check_container_state(&container_id).await;
-            //             if deployment_status != DeploymentStatus::Active {
-            //                 let deployment_healthcheck =
-            //                     DeploymentHealthCheck::from(&options.app_config.healthcheck);
-            //
-            //                 state
-            //                     .check_container_health(&container_id, &deployment_healthcheck)
-            //                     .await?
-            //             } else {
-            //                 emit(
-            //                     tx,
-            //                     StreamEvent::log(format!(
-            //                         "[{}] Container started running",
-            //                         options.app_config.name
-            //                     )),
-            //                 )
-            //                 .await;
-            //             }
 
             deployment
                 .update()

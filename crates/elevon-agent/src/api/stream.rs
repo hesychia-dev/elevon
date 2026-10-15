@@ -29,15 +29,41 @@ pub async fn emit(tx: &StreamSender, event: StreamEvent) {
     let _ = tx.send(Ok(Event::default().data(line))).await;
 }
 
+pub enum LogInput {
+    Event(StreamEvent),
+    Message(String),
+}
+
+impl From<StreamEvent> for LogInput {
+    fn from(event: StreamEvent) -> Self {
+        LogInput::Event(event)
+    }
+}
+
+impl From<String> for LogInput {
+    fn from(s: String) -> Self {
+        LogInput::Message(s)
+    }
+}
+
+impl From<LogInput> for StreamEvent {
+    fn from(value: LogInput) -> Self {
+        match value {
+            LogInput::Event(event) => event,
+            LogInput::Message(msg) => StreamEvent::log(msg),
+        }
+    }
+}
+
 #[async_trait]
 pub trait ActionLogger: Send + Sync {
-    async fn log(&self, message: String) -> Result<()>;
+    async fn log(&self, input: LogInput) -> Result<()>;
 }
 
 #[async_trait]
 impl ActionLogger for StreamSender {
-    async fn log(&self, message: String) -> Result<()> {
-        emit(self, StreamEvent::log(message)).await;
+    async fn log(&self, input: LogInput) -> Result<()> {
+        emit(self, input.into()).await;
         Ok(())
     }
 }
@@ -99,20 +125,30 @@ pub fn lock_action() -> anyhow::Result<std::fs::File> {
 
 #[async_trait]
 pub trait OptionLoggerExt {
-    async fn log_event(&self, msg: impl Into<String> + Send, level: StreamLogLevel) -> Result<()>;
+    async fn log_event(&self, input: LogInput) -> Result<()>;
 }
 
 #[async_trait]
 impl OptionLoggerExt for Option<&(dyn ActionLogger + Send + Sync)> {
-    async fn log_event(&self, msg: impl Into<String> + Send, level: StreamLogLevel) -> Result<()> {
-        let msg = msg.into();
+    async fn log_event(&self, input: LogInput) -> Result<()> {
         if let Some(logger) = self {
-            logger.log(msg).await?;
+            logger.log(input).await?;
         } else {
-            match level {
-                StreamLogLevel::Info => tracing::info!(%msg),
-                StreamLogLevel::Warn => tracing::warn!(%msg),
-                StreamLogLevel::Error => tracing::error!(%msg),
+            let (level, msg) = match input {
+                LogInput::Event(event) => match event {
+                    StreamEvent::Log { level, message } => (Some(level), Some(message)),
+                    StreamEvent::Error { message } => (Some(StreamLogLevel::Error), Some(message)),
+                    _ => (None, None),
+                },
+                LogInput::Message(msg) => (Some(StreamLogLevel::Info), Some(msg)),
+            };
+
+            if let (Some(level), Some(msg)) = (level, msg) {
+                match level {
+                    StreamLogLevel::Info => tracing::info!(%msg),
+                    StreamLogLevel::Warn => tracing::warn!(%msg),
+                    StreamLogLevel::Error => tracing::error!(%msg),
+                }
             }
         }
         Ok(())
