@@ -19,17 +19,17 @@ need() {
 }
 
 resolve_version() {
-    if [[ "$VERSION" != "latest" ]]; then
-        echo "${VERSION#v}"
-        return
-    fi
+	if [[ "$VERSION" != "latest" ]]; then
+		echo "${VERSION#v}"
+		return
+	fi
 
-    local api_url="https://api.github.com/repos/${REPO_PATH}/releases?per_page=100"
+	local api_url="https://api.github.com/repos/${REPO_PATH}/releases?per_page=100"
 
-    echo "Fetching releases from: $api_url" >&2
+	echo "Fetching releases from: $api_url" >&2
 
-    curl --fail --location --silent --show-error "$api_url" |
-        awk -F'"' '
+	curl --fail --location --silent --show-error "$api_url" |
+		awk -F'"' '
             /"tag_name"[[:space:]]*:[[:space:]]*"elevon-cli-v/ && !found {
                 for (i = 1; i <= NF; i++) {
                     if ($i ~ /^elevon-cli-v/) {
@@ -63,6 +63,7 @@ resolve_asset() {
 
 	case "$arch" in
 	x86_64 | amd64) arch="x86_64" ;;
+	arm64 | aarch64) arch="aarch64" ;;
 	*) die "unsupported architecture: $arch" ;;
 	esac
 
