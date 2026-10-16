@@ -7,6 +7,7 @@ use crate::image::util::BuildContextProps;
 
 /// Returns an image tag with the following style:
 /// {image_repository}:{git_commit_sha}-{Option<{git diff sha}>}
+/// On non-git repositories the image is being beilt every time
 pub fn get_image_tag(build_context: &BuildContextProps) -> anyhow::Result<String> {
     let mut _commit_sha = "modified".to_string();
 
