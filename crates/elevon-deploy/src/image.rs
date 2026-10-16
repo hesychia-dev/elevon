@@ -56,7 +56,6 @@ pub async fn build_image(
     };
 
     if image_exists && image_tag != "modified" {
-        tracing::info!("Image is already pushed to registry");
         return Ok(false);
     }
 
