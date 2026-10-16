@@ -63,7 +63,6 @@ impl ApiState {
                 .or(Deployment::fields().status().eq(DeploymentStatus::Pending)),
         )
         .include(Deployment::fields().app())
-        .include(Deployment::fields().options())
         .exec(&mut db)
         .await?;
 
@@ -71,7 +70,6 @@ impl ApiState {
 
         for mut deployment in deployments {
             let app = deployment.app.get();
-            let deployment_options = deployment.options.get();
 
             let (Some(container_id), Some(web_deployment)) =
                 (deployment.container_id.clone(), deployment.web.clone())
@@ -84,25 +82,13 @@ impl ApiState {
 
             let deployment_status = self.check_container_state(&container_id).await;
             if deployment_status != DeploymentStatus::Active {
-                if let Some(deployment_options) = deployment_options
-                    && self
-                        .check_container_health(
-                            &container_id,
-                            None,
-                            &deployment_options.healthcheck,
-                            None,
-                        )
-                        .await
-                        .is_err()
-                {
-                    continue;
-                }
-
                 deployment
                     .update()
                     .status(deployment_status)
                     .exec(&mut db)
                     .await?;
+
+                // TODO: Maybe add a debug log or something
 
                 continue;
             }
@@ -231,28 +217,33 @@ impl ApiState {
             consecutive_successes += 1;
 
             // Check the HTTP path health
-            let path_healthy = is_container_path_healthy(log_id, healthcheck, logger, &container)
-                .await
-                .unwrap_or_default();
+            let path_healthy =
+                is_container_path_healthy(log_id, healthcheck, logger, &container).await?;
 
             if !path_healthy {
                 consecutive_successes = 0;
-                if attempt < healthcheck.retries {
-                    logger.log_event(
+
+                logger.log_event(
                         StreamEvent::warn(
                             format!("[{log_id}] Container path health check failed, retrying (retries {}/{})...", 
-                                attempt + 1,
+                                attempt,
                                 healthcheck.retries
                             )
                         ).into()
                     ).await?;
-                }
 
+                // Intervals are between or after faifed checks so...
                 if attempt < healthcheck.retries {
                     tokio::time::sleep(interval_duration).await;
                 }
 
                 continue;
+            }
+
+            // Sleeping for the <stabilization_duration> just to wait it out.
+            // TODO: Also we could check the health once again after this.
+            if attempt < healthcheck.retries {
+                tokio::time::sleep(stabilization_duration).await;
             }
 
             if start_time.elapsed() >= stabilization_duration
@@ -264,10 +255,6 @@ impl ApiState {
 
                 return Ok(());
             }
-
-            // if attempt < healthcheck.retries {
-            //     tokio::time::sleep(interval_duration).await;
-            // }
         }
 
         logger

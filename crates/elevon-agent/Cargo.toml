@@ -1,6 +1,6 @@
 [package]
 name = "elevon-agent"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 default-run = "elevon-agent"
 
@@ -37,4 +37,3 @@ elevon-config.workspace = true
 elevon-contracts.workspace = true
 elevon-fs = { workspace = true, features = ["agent"] }
 elevon-http.workspace = true
-

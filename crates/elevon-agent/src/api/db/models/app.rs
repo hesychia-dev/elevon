@@ -63,12 +63,6 @@ impl App {
 
             return Ok(app);
         }
-        //
-        //         let role = if payload.web_app.is_some() {
-        //             AppRoleDb::Web
-        //         } else {
-        //             AppRoleDb::Worker
-        //         };
 
         let app = toasty::create!(App {
             name: payload.name.to_string(),
