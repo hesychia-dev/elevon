@@ -6,7 +6,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Providers } from "@/components/providers.tsx";
+import { Providers } from "@/components/providers";
 import "@/styles/app.css";
 
 const SHELL_BG = "oklch(0.145 0 0)";

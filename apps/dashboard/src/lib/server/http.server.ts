@@ -48,9 +48,10 @@ async function request<T>(
     return fail({
       status: response.status,
       code: typeof payload?.code === "string" ? payload.code : "unknown",
-      message: typeof payload?.message === "string"
-        ? payload.message
-        : `API Error: ${response.status}`,
+      message:
+        typeof payload?.message === "string"
+          ? payload.message
+          : `API Error: ${response.status}`,
     });
   }
 

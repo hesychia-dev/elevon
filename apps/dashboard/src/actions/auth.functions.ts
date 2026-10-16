@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
-import { clearSessionCookie, setSessionCookie } from "@/actions/auth.server.ts";
-import { actionFail, actionOk, type ActionState } from "@/lib/action.ts";
-import { fetchUser, login, logout } from "@/lib/server/endpoints/mod.server.ts";
-import { parseLoginForm } from "@/lib/schema/auth.ts";
+import { clearSessionCookie, setSessionCookie } from "@/actions/auth.server";
+import { type ActionState, actionFail, actionOk } from "@/lib/action";
+import { parseLoginForm } from "@/lib/schema/auth";
+import { fetchUser, login, logout } from "@/lib/server/endpoints/mod.server";
 
 export const loginFn = createServerFn({ method: "POST" })
   .validator(parseLoginForm)

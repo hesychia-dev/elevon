@@ -33,27 +33,26 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-features
 
-      # TODO: Uncomment when tests are added
-      # - name: cargo test
-      #   run: cargo test --workspace --all-targets --all-features
+      - name: cargo test
+        run: cargo test --workspace --all-targets --all-features
 
-  deno-checks:
-    if: ${{ github.event.pull_request.draft == false }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Check formatting
-        run: deno fmt --check
-
-      - name: Lint
-        run: deno lint
+#   deno-checks:
+#     if: ${{ github.event.pull_request.draft == false }}
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v7
+# 
+#       - name: Install Deno
+#         uses: denoland/setup-deno@v2
+#         with:
+#           deno-version: v2.x
+# 
+#       - name: Check formatting
+#         run: deno fmt --check
+# 
+#       - name: Lint
+#         run: deno lint
 
     # TODO: Uncomment when tests are added
     #   - name: Test

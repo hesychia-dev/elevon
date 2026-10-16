@@ -1,18 +1,18 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useActionState, useEffect } from "react";
-import { Button } from "@/components/ui/button.tsx";
+import { loginAction } from "@/actions/auth.actions";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card.tsx";
-import { Input } from "@/components/ui/input.tsx";
-import { Label } from "@/components/ui/label.tsx";
-import { safeRedirectPath } from "@/lib/utils.ts";
-import { userQueryOptions } from "@/queries/auth.ts";
-import { loginAction } from "@/actions/auth.actions.ts";
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { safeRedirectPath } from "@/lib/utils";
+import { userQueryOptions } from "@/queries/auth";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -57,10 +57,7 @@ function RouteComponent() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form
-            action={formAction}
-            className="flex flex-col gap-4"
-          >
+          <form action={formAction} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="key">Access key</Label>
               <Input
@@ -72,11 +69,7 @@ function RouteComponent() {
                 required
               />
             </div>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={isPending}
-            >
+            <Button type="submit" className="w-full" disabled={isPending}>
               Sign in
             </Button>
           </form>
