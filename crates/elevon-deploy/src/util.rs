@@ -34,10 +34,7 @@ pub fn get_image_tag(build_context: &BuildContextProps) -> anyhow::Result<String
                         .add_custom_ignore_filename(&build_context.dockerfile_path)
                         .build()
                         .filter_map(|result| result.ok())
-                        .filter_map(|entry| {
-                            // Get relative path or absolute path string depending on your needs
-                            entry.path().to_str().map(|s| s.to_string())
-                        })
+                        .filter_map(|entry| entry.path().to_str().map(|s| s.to_string()))
                         .collect();
 
                     statuses.iter().for_each(|i| {
