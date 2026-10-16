@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use reqwest::{
     header::{AUTHORIZATION, HeaderMap},
 };
 
-use crate::config::registry::RegistryConfig;
+use crate::config::{BuildConfig, registry::RegistryConfig};
 use crate::{
     config::{Config, app::AppConfig},
     util::get_image_tag,
@@ -120,8 +120,11 @@ pub fn prepare_apps_deploy_payload(
     config: &Config,
     registry_config: &RegistryConfig,
     selected_apps: Vec<(String, AppConfig)>,
+    config_path: impl AsRef<Path>,
+    build_config: &BuildConfig,
 ) -> Result<AppDeployPayload> {
-    let image_tag = get_image_tag().context("failed to get image tag")?;
+    let build_context = crate::image::util::get_build_context(config_path, build_config);
+    let image_tag = get_image_tag(&build_context).context("failed to get image tag")?;
     let project_vars = config.prepare_project_env_vars(registry_config)?;
 
     let apps_payload: Vec<AppPayload> = selected_apps
@@ -263,6 +266,8 @@ mod tests {
     #[tokio::test]
     async fn test_prepare_apps_deploy_payload() -> Result<()> {
         let config = Config::from_file("templates/config.yml")?;
+        let config_path = "templates/config.yml".to_string();
+
         let selected_apps = config.get_selected_apps(&[])?;
 
         let registry_config = RegistryConfig {
@@ -272,7 +277,13 @@ mod tests {
         };
 
         set_config_env_variables();
-        let payload = prepare_apps_deploy_payload(&config, &registry_config, selected_apps)?;
+        let payload = prepare_apps_deploy_payload(
+            &config,
+            &registry_config,
+            selected_apps,
+            config_path,
+            &config.build,
+        )?;
 
         assert_eq!(payload.apps.len(), 1);
         assert_eq!(payload.apps[0].name, "web");
@@ -298,6 +309,8 @@ mod tests {
     #[tokio::test]
     async fn test_app_deploy_with_template_config() -> Result<()> {
         let config = Config::from_file("templates/config.yml")?;
+        let config_path = "templates/config.yml".to_string();
+
         let selected_apps = config.get_selected_apps(&[])?;
 
         let registry_config = RegistryConfig {
@@ -307,7 +320,13 @@ mod tests {
         };
 
         set_config_env_variables();
-        let payload = prepare_apps_deploy_payload(&config, &registry_config, selected_apps)?;
+        let payload = prepare_apps_deploy_payload(
+            &config,
+            &registry_config,
+            selected_apps,
+            config_path,
+            &config.build,
+        )?;
 
         let fake = FakeApi::default();
         let service = DeployService::new(fake);

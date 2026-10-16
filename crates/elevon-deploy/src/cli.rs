@@ -87,7 +87,7 @@ pub struct UpgradeArgs {
 
 #[derive(Debug, Args)]
 pub struct BuildArgs {
-    #[arg(long, short, help = "Push the image to the registry")]
+    #[arg(long, short = 'P', help = "Push the image to the registry")]
     pub push: bool,
 }
 

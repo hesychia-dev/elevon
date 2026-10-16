@@ -13,34 +13,52 @@ pub fn image_reference(registry_server: &str, image_name: &str, tag: &str) -> St
     )
 }
 
+pub struct BuildContextProps {
+    pub contenxt_dir: PathBuf,
+    pub dockerfile: String,
+    pub dockerfile_path: PathBuf,
+}
+
 pub fn get_build_context(
     config_path: impl AsRef<Path>,
     build_config: &BuildConfig,
-) -> (PathBuf, String) {
+) -> BuildContextProps {
     let config_dir = config_path
         .as_ref()
         .parent()
         .unwrap_or_else(|| Path::new("."));
 
-    let (context, dockerfile): (PathBuf, String) = match build_config {
-        BuildConfig::Path(path) => (config_dir.join(path), "Dockerfile".to_string()),
-        BuildConfig::Options(BuildOptions { path, dockerfile }) => (
-            config_dir.join(path),
-            dockerfile
+    match build_config {
+        BuildConfig::Path(path) => BuildContextProps {
+            contenxt_dir: config_dir.join(path),
+            dockerfile: "Dockerfile".to_string(),
+            dockerfile_path: config_dir.join(path).join(".dockerignore"),
+        },
+        BuildConfig::Options(BuildOptions { path, dockerfile }) => {
+            let dockerfile = dockerfile
                 .clone()
-                .unwrap_or_else(|| "Dockerfile".to_string()),
-        ),
-    };
+                .unwrap_or_else(|| "Dockerfile".to_string());
+            // In case of Docker file having
+            let dockerfile_path = dockerfile
+                .strip_suffix(".")
+                .map(|s| config_dir.join(path).join(format!(".dockerignore.{s}")))
+                .unwrap_or_else(|| config_dir.join(path).join(".dockerignore"));
 
-    (context, dockerfile)
+            BuildContextProps {
+                contenxt_dir: config_dir.join(path),
+                dockerfile,
+                dockerfile_path,
+            }
+        }
+    }
 }
 
-pub fn tar_context(dir: &Path) -> anyhow::Result<Vec<u8>> {
+pub fn tar_context(build_context: BuildContextProps) -> anyhow::Result<Vec<u8>> {
     use ignore::WalkBuilder;
     use std::fs::File;
     use tar::{Builder, EntryType, Header, HeaderMode};
 
-    let root = dir.canonicalize()?;
+    let root = build_context.contenxt_dir.canonicalize()?;
 
     anyhow::ensure!(
         root.is_dir(),
@@ -49,7 +67,7 @@ pub fn tar_context(dir: &Path) -> anyhow::Result<Vec<u8>> {
     );
 
     let walker = WalkBuilder::new(&root)
-        .add_custom_ignore_filename(".dockerignore")
+        .add_custom_ignore_filename(build_context.dockerfile_path)
         .build();
 
     let mut ar = Builder::new(Vec::new());

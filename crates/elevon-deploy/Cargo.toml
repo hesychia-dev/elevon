@@ -27,3 +27,4 @@ elevon-config.workspace = true
 elevon-contracts.workspace = true
 elevon-http.workspace = true
 elevon-fs.workspace = true
+git2 = "0.21.0"
