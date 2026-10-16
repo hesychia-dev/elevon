@@ -241,7 +241,7 @@ impl ApiState {
             }
 
             // Sleeping for the <stabilization_duration> just to wait it out.
-            // TODO: Also we could check the health once again after it.
+            // TODO: Also we could check the health once again after this.
             if attempt < healthcheck.retries {
                 tokio::time::sleep(stabilization_duration).await;
             }
