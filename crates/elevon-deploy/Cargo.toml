@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 shlex = "2.0.1"
 bytesize = { version = "2.7.0", features = ["serde"] }
+git2 = "0.21.0"
 ignore = "0.4.33"
 
 anyhow.workspace = true

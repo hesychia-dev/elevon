@@ -5,6 +5,7 @@ use crate::{
     agent::AgentClient,
     cli::{Commands, DeployArgs},
     config::Config,
+    util::resolve_config_path,
 };
 
 pub mod agent;
@@ -18,10 +19,7 @@ pub async fn run_deploy_cli(
     command: Commands,
     cli_version: Option<&str>,
 ) -> anyhow::Result<()> {
-    let with_level = matches!(
-        command,
-        Commands::Build(_) | Commands::Deploy(_) | Commands::Rollback(_)
-    );
+    let with_level = matches!(command, Commands::Deploy(_) | Commands::Rollback(_));
     elevon_http::init_cli_logging(with_level);
 
     if matches!(command, Commands::Init) {
@@ -34,12 +32,7 @@ pub async fn run_deploy_cli(
             .context("failed to upgrade cli");
     }
 
-    let config_path = match (&arg.config, &arg.project) {
-        (Some(path), None) => path.clone(),
-        (None, Some(project)) => format!(".elevon/deploy.{project}.yml"),
-        (None, None) => ".elevon/deploy.yml".to_string(),
-        (Some(_), Some(_)) => unreachable!("clap rejects conflicting arguments"),
-    };
+    let config_path = resolve_config_path(&arg.config, &arg.project);
 
     let config = Config::from_file(&config_path)?;
     let agent_credentials = config
@@ -68,7 +61,7 @@ pub async fn run_deploy_cli(
                 .await?;
         }
         Commands::Push => {
-            config.run_push().await?;
+            config.run_push(&config_path).await?;
         }
         Commands::Deploy(args) => {
             config

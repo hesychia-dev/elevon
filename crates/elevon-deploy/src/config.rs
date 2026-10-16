@@ -152,20 +152,21 @@ impl Config {
         push: bool,
     ) -> Result<()> {
         let built =
-            crate::image::build_image(registry_config, &self.build, &self.image, config_path)
+            crate::image::build_image(&self.image, registry_config, &self.build, config_path)
                 .await?;
 
         if built && push {
-            self.run_push().await?;
+            self.run_push(config_path).await?;
             return Ok(());
         }
 
         Ok(())
     }
 
-    pub async fn run_push(&self) -> Result<()> {
+    pub async fn run_push(&self, config_path: &str) -> Result<()> {
         let registry_credentials = self.registry.resolved_credentials()?;
-        crate::image::push_image(&self.image, registry_credentials).await?;
+        crate::image::push_image(&self.image, registry_credentials, &self.build, config_path)
+            .await?;
         Ok(())
     }
 
@@ -233,7 +234,13 @@ impl Config {
         tracing::Span::current().pb_set_message(&format!("deploying {}", self.name));
         tracing::info!("Deploying apps: {:?}", app_names);
 
-        let payload = prepare_apps_deploy_payload(self, &registry_config, selected_apps)?;
+        let payload = prepare_apps_deploy_payload(
+            self,
+            &registry_config,
+            selected_apps,
+            config_path,
+            &self.build,
+        )?;
 
         let deploy_service = DeployService::new(agent_client);
         deploy_service.push_deploy(payload).await?;
