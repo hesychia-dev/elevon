@@ -377,22 +377,7 @@ async fn deploy_app(
 
     let (new_deployment, new_container_id) =
         pull_image_and_run_container(tx, &state, deployment, options).await?;
-    // let Ok((new_deployment, new_container_id)) =
-    //     pull_image_and_run_container(tx, &state, deployment, options).await
-    // else {
-    //     // TODO: FEAT For multi project deployments add a linked way of stopping on either apps failure
-    //     emit(
-    //         tx,
-    //         StreamEvent::Log {
-    //             level: StreamLogLevel::Warn,
-    //             message: format!("[{}] Failed to start, skipping", app_config.name),
-    //         },
-    //     )
-    //     .await;
-    //
-    //     return Ok(());
-    // };
-    //
+
     let app_data = DeployAppData {
         id: new_deployment.id.to_string(),
         project: app_config.project.to_string(),
