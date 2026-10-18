@@ -148,25 +148,27 @@ impl Config {
     pub async fn run_build(
         &self,
         registry_config: &RegistryConfig,
-        config_path: &str,
+        config_path: String,
         push: bool,
     ) -> Result<()> {
         let built =
-            crate::image::build_image(&self.image, registry_config, &self.build, config_path)
+            crate::image::build_image(&self.image, registry_config, &self.build, &config_path)
                 .await?;
 
         if built && push {
-            self.run_push(config_path).await?;
+            self.run_push(registry_config, &config_path).await?;
             return Ok(());
         }
 
         Ok(())
     }
 
-    pub async fn run_push(&self, config_path: &str) -> Result<()> {
-        let registry_credentials = self.registry.resolved_credentials()?;
-        crate::image::push_image(&self.image, registry_credentials, &self.build, config_path)
-            .await?;
+    pub async fn run_push(
+        &self,
+        registry_config: &RegistryConfig,
+        config_path: &str,
+    ) -> Result<()> {
+        crate::image::push_image(&self.image, registry_config, &self.build, config_path).await?;
         Ok(())
     }
 
@@ -228,7 +230,8 @@ impl Config {
     ) -> Result<()> {
         let selected_apps = self.get_selected_apps(app_names)?;
 
-        self.run_build(&registry_config, config_path, true).await?;
+        self.run_build(&registry_config, config_path.to_string(), true)
+            .await?;
 
         let app_names: Vec<_> = selected_apps.iter().map(|(key, _)| key).collect();
         tracing::Span::current().pb_set_message(&format!("deploying {}", self.name));
