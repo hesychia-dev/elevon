@@ -115,6 +115,7 @@ pub async fn push_image(
     Ok(())
 }
 
+#[derive(Debug)]
 struct ImageProps {
     build_context: BuildContextProps,
     image_tag: String,
@@ -129,7 +130,7 @@ impl ImageProps {
         build_config: &BuildConfig,
         config_path: String,
     ) -> Result<Self> {
-        let build_context = util::get_build_context(config_path, build_config);
+        let build_context = util::get_build_context(config_path, build_config)?;
         let image_tag = get_image_tag(&build_context)?;
 
         let image_reference =
@@ -148,5 +149,35 @@ impl ImageProps {
             image_reference,
             credentials,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use elevon_config::ElevonConfig;
+
+    use crate::config::Config;
+
+    use super::*;
+
+    #[test]
+    fn test_image_props() -> Result<()> {
+        let config = Config::from_file("templates/config.yml")?;
+
+        let image_props = ImageProps::get_props(
+            &config.name,
+            &config.registry,
+            &config.build,
+            "templates/config.yml".to_string(),
+        )?;
+
+        assert_eq!(
+            image_props.credentials.serveraddress,
+            Some("ghcr.io".to_string())
+        );
+
+        println!("{:?}", image_props);
+
+        Ok(())
     }
 }

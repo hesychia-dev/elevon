@@ -30,9 +30,15 @@ pub fn get_image_tag(build_context: &BuildContextProps) -> anyhow::Result<String
 
             match repo.statuses(Some(&mut opts)) {
                 Ok(statuses) => {
-                    let valid_paths: HashSet<String> = WalkBuilder::new(workdir)
-                        .add_custom_ignore_filename(&build_context.dockerfile_path)
-                        .build()
+                    let mut walker = WalkBuilder::new(&build_context.context_dir);
+
+                    if let Some(dockerignore_path) = &build_context.dockerignore_path {
+                        walker.add_custom_ignore_filename(dockerignore_path);
+                    }
+
+                    let walker = walker.build();
+
+                    let valid_paths: HashSet<String> = walker
                         .filter_map(|result| result.ok())
                         .filter_map(|entry| entry.path().to_str().map(|s| s.to_string()))
                         .collect();

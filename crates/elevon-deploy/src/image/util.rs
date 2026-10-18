@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 
 use crate::config::{BuildConfig, BuildOptions};
 
@@ -13,62 +13,82 @@ pub fn image_reference(registry_server: &str, image_name: &str, tag: &str) -> St
     )
 }
 
+#[derive(Debug)]
 pub struct BuildContextProps {
-    pub contenxt_dir: PathBuf,
+    pub context_dir: PathBuf,
     pub dockerfile: String,
-    pub dockerfile_path: PathBuf,
+    pub dockerignore_path: Option<PathBuf>,
 }
 
 pub fn get_build_context(
     config_path: impl AsRef<Path>,
     build_config: &BuildConfig,
-) -> BuildContextProps {
+) -> Result<BuildContextProps> {
     let config_dir = config_path
         .as_ref()
         .parent()
         .unwrap_or_else(|| Path::new("."));
 
-    match build_config {
-        BuildConfig::Path(path) => BuildContextProps {
-            contenxt_dir: config_dir.join(path),
-            dockerfile: "Dockerfile".to_string(),
-            dockerfile_path: config_dir.join(path).join(".dockerignore"),
-        },
+    let resolve_context_dir = |context_path: &str| -> Result<PathBuf> {
+        let context_dir = config_dir.join(context_path).canonicalize()?;
+
+        anyhow::ensure!(
+            context_dir.is_dir(),
+            "build context not a directory: {}",
+            context_dir.display()
+        );
+
+        Ok(context_dir)
+    };
+
+    let context = match build_config {
+        BuildConfig::Path(path) => {
+            let context_dir = resolve_context_dir(path)?;
+            let dockerignore_path = config_dir.join(".dockerignore").canonicalize().ok();
+
+            BuildContextProps {
+                context_dir,
+                dockerfile: "Dockerfile".to_string(),
+                dockerignore_path,
+            }
+        }
         BuildConfig::Options(BuildOptions { path, dockerfile }) => {
+            let context_dir = resolve_context_dir(path)?;
             let dockerfile = dockerfile
                 .clone()
                 .unwrap_or_else(|| "Dockerfile".to_string());
-            // In case of Docker file having
-            let dockerfile_path = dockerfile
+
+            // In case of 'Dockerfile' having a suffix
+            let dockerignore_path = dockerfile
                 .strip_suffix(".")
-                .map(|s| config_dir.join(path).join(format!(".dockerignore.{s}")))
-                .unwrap_or_else(|| config_dir.join(path).join(".dockerignore"));
+                .map(|s| context_dir.join(format!(".dockerignore.{s}")))
+                .unwrap_or_else(|| context_dir.join(path).join(".dockerignore"))
+                .canonicalize()
+                .ok();
 
             BuildContextProps {
-                contenxt_dir: config_dir.join(path),
+                context_dir,
                 dockerfile,
-                dockerfile_path,
+                dockerignore_path,
             }
         }
-    }
+    };
+
+    Ok(context)
 }
 
-pub fn tar_context(build_context: BuildContextProps) -> anyhow::Result<Vec<u8>> {
+pub fn tar_context(build_context: BuildContextProps) -> Result<Vec<u8>> {
     use ignore::WalkBuilder;
     use std::fs::File;
     use tar::{Builder, EntryType, Header, HeaderMode};
 
-    let root = build_context.contenxt_dir.canonicalize()?;
+    let mut walker = WalkBuilder::new(&build_context.context_dir);
 
-    anyhow::ensure!(
-        root.is_dir(),
-        "build context not a directory: {}",
-        root.display()
-    );
+    if let Some(dockerignore_path) = build_context.dockerignore_path {
+        walker.add_custom_ignore_filename(dockerignore_path);
+    }
 
-    let walker = WalkBuilder::new(&root)
-        .add_custom_ignore_filename(build_context.dockerfile_path)
-        .build();
+    let walker = walker.build();
 
     let mut ar = Builder::new(Vec::new());
     ar.mode(HeaderMode::Deterministic);
@@ -85,7 +105,7 @@ pub fn tar_context(build_context: BuildContextProps) -> anyhow::Result<Vec<u8>> 
         }
 
         let relative_path = path
-            .strip_prefix(&root)
+            .strip_prefix(&build_context.context_dir)
             .context("failed to make archive path relative")?;
 
         let mut header = Header::new_gnu();
@@ -98,4 +118,31 @@ pub fn tar_context(build_context: BuildContextProps) -> anyhow::Result<Vec<u8>> 
     }
 
     Ok(ar.into_inner()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use elevon_config::ElevonConfig;
+
+    use crate::config::Config;
+
+    use super::*;
+
+    #[test]
+    fn test_build_context() -> Result<()> {
+        let config = Config::from_file("templates/config.yml")?;
+        let build_context = get_build_context("./templates/config.yml", &config.build)?;
+
+        assert_eq!(
+            build_context
+                .context_dir
+                .file_name()
+                .and_then(|n| n.to_str()),
+            Some("elevon-deploy")
+        );
+
+        assert!(build_context.dockerignore_path.is_none());
+
+        Ok(())
+    }
 }

@@ -123,7 +123,7 @@ pub fn prepare_apps_deploy_payload(
     config_path: impl AsRef<Path>,
     build_config: &BuildConfig,
 ) -> Result<AppDeployPayload> {
-    let build_context = crate::image::util::get_build_context(config_path, build_config);
+    let build_context = crate::image::util::get_build_context(config_path, build_config)?;
     let image_tag = get_image_tag(&build_context).context("failed to get image tag")?;
     let project_vars = config.prepare_project_env_vars(registry_config)?;
 
