@@ -176,8 +176,6 @@ mod tests {
             Some("ghcr.io".to_string())
         );
 
-        println!("{:?}", image_props);
-
         Ok(())
     }
 }
