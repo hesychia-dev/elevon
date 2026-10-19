@@ -183,6 +183,7 @@ fn prettify_status(status: &str) -> String {
     format!("{prefix} size: {}", format_bytes(bytes))
 }
 
+// TODO: This doesnt seem to be correct for some reason
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;

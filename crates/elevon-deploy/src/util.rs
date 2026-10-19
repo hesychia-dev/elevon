@@ -11,7 +11,7 @@ use crate::image::util::BuildContextProps;
 pub fn get_image_tag(build_context: &BuildContextProps) -> anyhow::Result<String> {
     let mut _commit_sha = "modified".to_string();
 
-    let (is_dirty, mut changed_paths) = match Repository::open(".") {
+    let (is_dirty, mut changed_paths) = match Repository::discover(".") {
         Ok(repo) => {
             let workdir = repo
                 .workdir()
@@ -30,9 +30,15 @@ pub fn get_image_tag(build_context: &BuildContextProps) -> anyhow::Result<String
 
             match repo.statuses(Some(&mut opts)) {
                 Ok(statuses) => {
-                    let valid_paths: HashSet<String> = WalkBuilder::new(workdir)
-                        .add_custom_ignore_filename(&build_context.dockerfile_path)
-                        .build()
+                    let mut walker = WalkBuilder::new(&build_context.context_dir);
+
+                    if let Some(dockerignore_path) = &build_context.dockerignore_path {
+                        walker.add_custom_ignore_filename(dockerignore_path);
+                    }
+
+                    let walker = walker.build();
+
+                    let valid_paths: HashSet<String> = walker
                         .filter_map(|result| result.ok())
                         .filter_map(|entry| entry.path().to_str().map(|s| s.to_string()))
                         .collect();
@@ -91,5 +97,26 @@ pub fn resolve_config_path(config: &Option<String>, project: &Option<String>) ->
         (None, Some(project)) => format!(".elevon/deploy.{project}.yml"),
         (None, None) => ".elevon/deploy.yml".to_string(),
         (Some(_), Some(_)) => unreachable!("clap rejects conflicting arguments"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use elevon_config::ElevonConfig;
+
+    use crate::{config::Config, image::util::get_build_context};
+
+    use super::*;
+
+    #[test]
+    fn test_get_image_tag() -> anyhow::Result<()> {
+        let config = Config::from_file("templates/config.yml")?;
+        let build_context = get_build_context("./templates/config.yml", &config.build)?;
+
+        let image_tag = get_image_tag(&build_context)?;
+
+        assert!(image_tag != "modified");
+
+        Ok(())
     }
 }

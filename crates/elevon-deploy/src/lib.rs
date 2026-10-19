@@ -57,11 +57,11 @@ pub async fn run_deploy_cli(
         Commands::Upgrade(_) => unreachable!(),
         Commands::Build(args) => {
             config
-                .run_build(&registry_credentials, &config_path, args.push)
+                .run_build(&registry_credentials, config_path, args.push)
                 .await?;
         }
         Commands::Push => {
-            config.run_push(&config_path).await?;
+            config.run_push(&registry_credentials, &config_path).await?;
         }
         Commands::Deploy(args) => {
             config
