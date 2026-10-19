@@ -29,7 +29,7 @@ async fn test_build_and_push_image() -> Result<()> {
     push_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
     let url = format!(
-        "https://localhost:5000/v2/{}/manifests/{}",
+        "http://localhost:5000/v2/{}/manifests/{}",
         config.image, config.name
     );
     let client = reqwest::Client::new();
