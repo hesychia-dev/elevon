@@ -71,21 +71,21 @@ where
     Ok(())
 }
 
-pub struct ProgressPrinter {
+struct ProgressPrinter {
     mode: ProgressMode,
     // skip repeated Waiting / same % so the terminal isn't a wall of noise
     last_line_key: Option<String>,
 }
 
 impl ProgressPrinter {
-    pub fn new(mode: ProgressMode) -> Self {
+    fn new(mode: ProgressMode) -> Self {
         Self {
             mode,
             last_line_key: None,
         }
     }
 
-    pub fn handle(&mut self, info: &impl DockerProgressEvent, action: &str) -> anyhow::Result<()> {
+    fn handle(&mut self, info: &impl DockerProgressEvent, action: &str) -> anyhow::Result<()> {
         if let Some(err) = info.error_detail() {
             anyhow::bail!("{action} failed: {err:?}");
         }

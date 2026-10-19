@@ -108,7 +108,6 @@ pub async fn push_image(
         Some(options),
         Some(image_props.credentials),
     );
-
     drain_progress_stream(stream, ProgressMode::Push, "push").await?;
 
     print_success(&format!("Pushed {}", image_props.image_reference));
