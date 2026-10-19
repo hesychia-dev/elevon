@@ -32,11 +32,18 @@ async fn test_build_image() -> Result<()> {
 #[tokio::test]
 #[cfg(feature = "heavy_tests")]
 async fn test_push_image() -> Result<()> {
+    let docker = bollard::Docker::connect_with_defaults()?;
+
     let (config, registry_config) = get_config()?;
 
     build_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
     push_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
+
+    let inspect_response = docker.inspect_container(&config.image, None).await?;
+    println!("inspect_response: {:?}", inspect_response);
+
+    panic!("test");
 
     Ok(())
 }
