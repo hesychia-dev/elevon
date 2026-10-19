@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { logoutFn } from "@/actions/auth.functions.ts";
-import { Button } from "@/components/ui/button.tsx";
-import { queryKeys } from "@/queries/keys.ts";
+import { logoutFn } from "@/actions/auth.functions";
+import { Button } from "@/components/ui/button";
+import { queryKeys } from "@/queries/keys";
 
 export const Route = createFileRoute("/_authed/")({
   component: RouteComponent,
