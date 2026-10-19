@@ -27,20 +27,5 @@ async fn test_build_and_push_image() -> Result<()> {
     build_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
     push_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
-
-    let url = format!(
-        "http://localhost:5000/v2/{}/manifests/{}",
-        config.image, config.name
-    );
-    let client = reqwest::Client::new();
-
-    let response = client
-        .head(&url)
-        .basic_auth("test", Some("test"))
-        .send()
-        .await?;
-
-    println!("response: {:?}", response);
-
     Ok(())
 }
