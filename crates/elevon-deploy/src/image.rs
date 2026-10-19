@@ -38,7 +38,7 @@ pub async fn build_image(
         config_path.to_string(),
     )?;
 
-    tracing::info!("image_props build_image: {:?}", image_props);
+    println!("image_props build_image: {:?}", image_props);
 
     let image_exists = match docker
         .inspect_registry_image(
@@ -97,7 +97,7 @@ pub async fn push_image(
         config_path.to_string(),
     )?;
 
-    tracing::info!("image_props push_image: {:?}", image_props);
+    println!("image_props push_image: {:?}", image_props);
 
     let options = PushImageOptionsBuilder::default()
         .tag(&image_props.image_tag)
