@@ -40,7 +40,7 @@ jobs:
         run: cargo clippy --workspace --all-features
 
       - name: cargo test
-        run: cargo test --workspace --all-targets --all-features
+        run: cargo test --workspace --all-targets --all-features -- --nocapture
 
   deno-checks:
     if: ${{ github.event.pull_request.draft == false }}
