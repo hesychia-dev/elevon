@@ -40,7 +40,7 @@ async fn test_push_image() -> Result<()> {
 
     push_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
-    let inspect_response = docker.inspect_container(&config.image, None).await?;
+    let inspect_response = docker.inspect_container(&config.name, None).await?;
     println!("inspect_response: {:?}", inspect_response);
 
     panic!("test");
