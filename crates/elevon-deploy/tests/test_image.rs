@@ -20,6 +20,7 @@ fn get_config() -> Result<(Config, RegistryConfig)> {
 }
 
 #[tokio::test]
+#[cfg(feature = "heavy_tests")]
 async fn test_build_image() -> Result<()> {
     let (config, registry_config) = get_config()?;
 
@@ -29,6 +30,7 @@ async fn test_build_image() -> Result<()> {
 }
 
 #[tokio::test]
+#[cfg(feature = "heavy_tests")]
 async fn test_push_image() -> Result<()> {
     let (config, registry_config) = get_config()?;
 
