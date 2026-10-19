@@ -8,12 +8,11 @@ use bollard::{
     body_full,
     query_parameters::{BuildImageOptionsBuilder, PushImageOptionsBuilder},
 };
-use futures_util::StreamExt;
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
 use crate::{
     config::{BuildConfig, registry::RegistryConfig},
-    image::{progress::ProgressPrinter, util::BuildContextProps},
+    image::util::BuildContextProps,
     util::get_image_tag,
 };
 
@@ -104,24 +103,13 @@ pub async fn push_image(
 
     tracing::Span::current().pb_set_message(&status_msg);
 
-    let mut manifest_digest: Option<String> = None;
-
-    let mut stream = docker.push_image(
+    let stream = docker.push_image(
         &image_props.image_reference,
         Some(options),
         Some(image_props.credentials),
     );
 
-    let mut printer = ProgressPrinter::new(ProgressMode::Push);
-
-    while let Some(item) = stream.next().await {
-        let info = item.map_err(|e| anyhow::anyhow!("push failed: {e}"))?;
-
-        println!("status: {:?}", info.status);
-        printer.handle(&info, "push")?;
-    }
-
-    // drain_progress_stream(stream, ProgressMode::Push, "push").await?;
+    drain_progress_stream(stream, ProgressMode::Push, "push").await?;
 
     print_success(&format!("Pushed {}", image_props.image_reference));
 
