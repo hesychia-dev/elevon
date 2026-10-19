@@ -34,7 +34,11 @@ async fn test_build_and_push_image() -> Result<()> {
     );
     let client = reqwest::Client::new();
 
-    let response = client.head(&url).send().await?;
+    let response = client
+        .head(&url)
+        .basic_auth("test", Some("test"))
+        .send()
+        .await?;
 
     println!("response: {:?}", response);
 
