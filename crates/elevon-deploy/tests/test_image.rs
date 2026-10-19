@@ -21,29 +21,22 @@ fn get_config() -> Result<(Config, RegistryConfig)> {
 
 #[tokio::test]
 #[cfg(feature = "heavy_tests")]
-async fn test_build_image() -> Result<()> {
-    let (config, registry_config) = get_config()?;
-
-    build_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
-
-    Ok(())
-}
-
-#[tokio::test]
-#[cfg(feature = "heavy_tests")]
-async fn test_push_image() -> Result<()> {
-    let docker = bollard::Docker::connect_with_defaults()?;
-
+async fn test_build_and_push_image() -> Result<()> {
     let (config, registry_config) = get_config()?;
 
     build_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
     push_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
-    let inspect_response = docker.inspect_container(&config.name, None).await?;
-    println!("inspect_response: {:?}", inspect_response);
+    let url = format!(
+        "https://localhost:5000/v2/{}/manifests/{}",
+        config.image, config.name
+    );
+    let client = reqwest::Client::new();
 
-    panic!("test");
+    let response = client.head(&url).send().await?;
+
+    println!("response: {:?}", response);
 
     Ok(())
 }
