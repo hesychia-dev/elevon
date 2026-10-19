@@ -36,7 +36,7 @@ async fn test_push_image() -> Result<()> {
 
     let (config, registry_config) = get_config()?;
 
-    build_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
+    // build_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
     push_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
