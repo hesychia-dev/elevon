@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Run Docker containers
+        run: docker compose up -d --build
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

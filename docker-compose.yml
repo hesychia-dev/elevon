@@ -1,0 +1,12 @@
+services:
+  registry:
+    image: registry:latest
+    container_name: registry
+    ports:
+      - "5000:5000"
+    environment:
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: "Registry Realm"
+      REGISTRY_AUTH_HTPASSWD_PATH: ./tests/test_registry_htpasswd
+    volumes:
+      - ./tests:/tests:ro

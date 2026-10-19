@@ -1,0 +1,18 @@
+name: test-server
+image: hesychia-dev/test-server
+
+elevon:
+  agent:
+    url: $AGENT_URL
+    key: $AGENT_KEY
+
+registry:
+  server: $GHCR_SERVER
+  username: $GHCR_USERNAME
+  password: $GHCR_PASSWORD
+
+routing:
+  domain: el-test.hesychia.dev
+  port: 8000
+
+build: ./
