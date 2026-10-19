@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Run Docker containers
+        run: docker compose up -d --build
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -37,7 +40,7 @@ jobs:
         run: cargo clippy --workspace --all-features
 
       - name: cargo test
-        run: cargo test --workspace --all-targets --all-features
+        run: cargo test --workspace --all-targets --all-features -- --nocapture
 
   deno-checks:
     if: ${{ github.event.pull_request.draft == false }}

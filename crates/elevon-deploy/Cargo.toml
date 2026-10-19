@@ -3,6 +3,9 @@ name = "elevon-deploy"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+heavy_tests = []
+
 [dependencies]
 shlex = "2.0.1"
 bytesize = { version = "2.7.0", features = ["serde"] }
