@@ -95,7 +95,7 @@ pub async fn push_image(
         config_path.to_string(),
     )?;
 
-    println!("image_props: {:?}", image_props);
+    tracing::info!("image_props: {:?}", image_props);
 
     let options = PushImageOptionsBuilder::default()
         .tag(&image_props.image_tag)
