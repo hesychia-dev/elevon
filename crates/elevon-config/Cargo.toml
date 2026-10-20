@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-serde_yml = "0.0.13"
+noyalib = "0.0.58"
 
 serde.workspace = true
 thiserror.workspace = true

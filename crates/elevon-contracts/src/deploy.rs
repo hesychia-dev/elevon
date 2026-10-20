@@ -122,6 +122,13 @@ pub struct WebApp {
     pub domain: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticApp {
+    pub domain: String,
+    pub directory: String,
+    pub path: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppRuntimeOptions {
@@ -162,6 +169,7 @@ pub struct AppPayload {
     pub vars: Option<HashMap<String, String>>,
     pub tls: Option<TlsConfig>,
     pub web_app: Option<WebApp>,
+    pub static_app: Option<StaticApp>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

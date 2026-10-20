@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["agent"]
-agent = []
+agent = ["dep:axum", "dep:dotenvy", "dep:tower-http", "dep:mime_guess"]
+client = []
 
 [dependencies]
 flate2 = "1.1.10"
@@ -13,10 +13,14 @@ tar.workspace = true
 tempfile = "3.27.0"
 
 anyhow.workspace = true
-dotenvy.workspace = true
+arc-swap.workspace = true
+axum = { workspace = true, optional = true }
+dotenvy = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util"] }
+tower-http = { workspace = true, features = ["fs"], optional = true, }
+mime_guess = { version = "2.0.5", optional = true }
 
 elevon-contracts.workspace = true

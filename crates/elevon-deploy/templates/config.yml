@@ -29,6 +29,9 @@ routing:
   tls:
     cert: $TLS_CERT
     key: $TLS_KEY
+  # static:
+  #   dir: dist
+  #   index: root.html  # defaults to `index.html`
 
 # Directly uses the Dockerfile at specified destination.
 # If it's in a custom path, you can use following:

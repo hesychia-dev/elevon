@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use elevon_config::ResolveEnvCredentials;
 use elevon_contracts::deploy::{
     AppDeployPayload, AppPayload, AppRole, AppRollback, AppRollbackPayload, AppRuntimeOptions,
-    WebApp, log_stream_events,
+    StaticApp, WebApp, log_stream_events,
 };
 use reqwest::{
     Client, Url,
@@ -143,16 +143,34 @@ pub fn prepare_apps_deploy_payload(
                 .map(|tls| tls.resolved_credentials())
                 .transpose()?;
 
-            let web_app: Option<WebApp> = match &cfg.role {
+            let (web_app, static_app): (Option<WebApp>, Option<StaticApp>) = match &cfg.role {
                 AppRole::Web => {
                     let resolved_routing = config.routing.resolved_credentials()?;
 
-                    Some(WebApp {
-                        domain: resolved_routing.domain.clone(),
-                        port: resolved_routing.port,
-                    })
+                    if let Some(static_files) = resolved_routing.static_files {
+                        (
+                            None,
+                            Some(StaticApp {
+                                domain: resolved_routing.domain,
+                                directory: static_files.dir,
+                                path: static_files.path,
+                            }),
+                        )
+                    } else {
+                        if let Some(port) = resolved_routing.port {
+                            (
+                                Some(WebApp {
+                                    port,
+                                    domain: resolved_routing.domain,
+                                }),
+                                None,
+                            )
+                        } else {
+                            (None, None)
+                        }
+                    }
                 }
-                AppRole::Worker => None,
+                AppRole::Worker => (None, None),
             };
 
             let cmd = cfg.cmd.as_ref().and_then(|c| shlex::split(c));
@@ -183,6 +201,7 @@ pub fn prepare_apps_deploy_payload(
                 vars: Some(vars),
                 tls: tls_with_credentials,
                 web_app,
+                static_app,
             }))
         })
         .collect::<Result<Vec<_>>>()?

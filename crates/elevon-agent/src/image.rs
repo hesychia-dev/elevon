@@ -10,7 +10,7 @@ use bollard::{
 };
 use elevon_contracts::deploy::{
     AppDeployPayload, AppHealthCheckConfig, AppPayload, AppRole, AppRollbackPayload,
-    AppRuntimeOptions, StreamEvent, StreamLogLevel, TlsType, WebApp,
+    AppRuntimeOptions, StaticApp, StreamEvent, StreamLogLevel, TlsType, WebApp,
 };
 use elevon_fs::agent::{
     AppEnvOptions, TlsOptions, add_app_env, load_app_env, load_app_string_env, write_tls_file,
@@ -369,6 +369,8 @@ async fn deploy_app(
     };
 
     let web_deployment = deployment.web.clone();
+    let static_web_deployment = deployment.static_web.clone();
+
     let options = PullImageAndRunContainerOptions {
         db_tx: &mut db_tx,
         new_port,
@@ -387,6 +389,14 @@ async fn deploy_app(
             Some(web) => Some(WebApp {
                 port: web.port,
                 domain: web.domain,
+            }),
+            _ => None,
+        },
+        static_app: match static_web_deployment {
+            Some(static_web) => Some(StaticApp {
+                domain: static_web.domain,
+                directory: static_web.directory,
+                path: static_web.path,
             }),
             _ => None,
         },

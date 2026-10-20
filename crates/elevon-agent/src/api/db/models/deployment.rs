@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
-use elevon_contracts::deploy::{AppHealthCheckConfig, AppRuntimeOptions, WebApp};
+use elevon_contracts::deploy::{AppHealthCheckConfig, AppPayload, AppRuntimeOptions, WebApp};
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 use tabled::Tabled;
@@ -26,6 +26,8 @@ pub struct Deployment {
 
     pub web: Option<DeploymentWeb>,
 
+    pub static_web: Option<DeploymentStaticWeb>,
+
     #[default(DeploymentStatus::Pending)]
     pub status: DeploymentStatus,
 
@@ -43,24 +45,43 @@ pub struct Deployment {
 }
 
 impl Deployment {
-    // It would be better this to be also checking the containers status just to make sure its running or not
-    async fn _get_by_app_id(
+    pub async fn create_deployment(
         db: &mut toasty::Db,
-        app_id: &uuid::Uuid,
-        status: DeploymentStatus,
-    ) -> Result<Option<Self>> {
-        let deployment = Deployment::filter(
-            Deployment::fields()
-                .app_id()
-                .eq(app_id)
-                .and(Deployment::fields().status().eq(status)),
-        )
-        .include(Deployment::fields().app())
-        .include(Deployment::fields().options())
-        .latest_by(Deployment::fields().updated_at())
-        .first()
-        .exec(db)
-        .await?;
+        app: App,
+        payload: AppPayload,
+        port: Option<u16>,
+    ) -> Result<Self> {
+        let web = match (&payload.web_app, port) {
+            (Some(web_app), Some(new_port)) => Some(DeploymentWeb {
+                domain: web_app.domain.clone(),
+                port: new_port,
+            }),
+            _ => None,
+        };
+
+        let static_web = match &payload.static_app {
+            Some(static_app) => Some(DeploymentStaticWeb {
+                domain: static_app.domain.clone(),
+                directory: static_app.directory.clone(),
+                path: static_app.path.clone(),
+            }),
+            None => None,
+        };
+
+        let deployment = Deployment::create()
+            .app_id(app.id)
+            .web(web)
+            .static_web(static_web)
+            .exec(db)
+            .await?;
+
+        let runtime_options = DeploymentRuntimeOptions::from(&payload.runtime_options);
+
+        DeploymentOption::create()
+            .deployment_id(deployment.id)
+            .runtime(runtime_options)
+            .exec(db)
+            .await?;
 
         Ok(deployment)
     }
@@ -94,6 +115,28 @@ impl Deployment {
             .exec(db)
             .await?)
     }
+
+    // It would be better this to be also checking the containers status just to make sure its running or not
+    async fn _get_by_app_id(
+        db: &mut toasty::Db,
+        app_id: &uuid::Uuid,
+        status: DeploymentStatus,
+    ) -> Result<Option<Self>> {
+        let deployment = Deployment::filter(
+            Deployment::fields()
+                .app_id()
+                .eq(app_id)
+                .and(Deployment::fields().status().eq(status)),
+        )
+        .include(Deployment::fields().app())
+        .include(Deployment::fields().options())
+        .latest_by(Deployment::fields().updated_at())
+        .first()
+        .exec(db)
+        .await?;
+
+        Ok(deployment)
+    }
 }
 
 #[derive(
@@ -112,6 +155,13 @@ pub enum DeploymentStatus {
 pub struct DeploymentWeb {
     pub domain: String,
     pub port: u16,
+}
+
+#[derive(Debug, Clone, toasty::Embed)]
+pub struct DeploymentStaticWeb {
+    pub domain: String,
+    pub directory: String,
+    pub path: Option<String>,
 }
 
 impl From<&DeploymentWeb> for WebApp {

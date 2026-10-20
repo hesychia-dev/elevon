@@ -20,88 +20,6 @@ use crate::{
     image::progress::print_success,
 };
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum PortConfig {
-    Literal(u16),
-    Env(String),
-}
-
-impl Default for PortConfig {
-    fn default() -> Self {
-        Self::Literal(8000)
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct RoutingConfig {
-    pub domain: String,
-    pub port: PortConfig,
-    pub tls: Option<TlsConfig>,
-}
-
-#[derive(Debug)]
-pub struct ResolvedRoutingConfig {
-    pub domain: String,
-    pub port: u16,
-    pub tls: Option<TlsConfig>,
-}
-
-impl ResolveEnvCredentials for RoutingConfig {
-    type Output = ResolvedRoutingConfig;
-
-    fn resolved_credentials(&self) -> Result<Self::Output, elevon_config::ConfigError> {
-        let port = match &self.port {
-            PortConfig::Literal(port) => *port,
-            PortConfig::Env(key) => {
-                let value = resolve_env_or_literal(key)?;
-                value
-                    .parse::<u16>()
-                    .map_err(|_| ConfigError::InvalidValue {
-                        field: "routing.port".into(),
-                        value,
-                    })?
-            }
-        };
-
-        Ok(ResolvedRoutingConfig {
-            domain: self.domain.clone(),
-            port,
-            tls: self.tls.clone(),
-        })
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum BuildConfig {
-    Path(String),
-    Options(BuildOptions),
-}
-
-impl Default for BuildConfig {
-    fn default() -> Self {
-        BuildConfig::Path(".".to_string())
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(default)]
-pub struct BuildOptions {
-    pub path: String,
-    pub dockerfile: Option<String>,
-}
-
-impl Default for BuildOptions {
-    fn default() -> Self {
-        Self {
-            path: ".".to_string(),
-            dockerfile: None,
-        }
-    }
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -273,6 +191,123 @@ impl Config {
         print_success(&format!("Rolled back {}", self.name));
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum PortConfig {
+    Literal(u16),
+    Env(String),
+}
+
+impl Default for PortConfig {
+    fn default() -> Self {
+        Self::Literal(8000)
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct RoutingConfig {
+    pub domain: String,
+    pub port: Option<PortConfig>,
+    pub tls: Option<TlsConfig>,
+    #[serde(alias = "static")]
+    pub static_files: Option<StaticConfig>,
+}
+
+#[derive(Debug)]
+pub struct ResolvedRoutingConfig {
+    pub domain: String,
+    pub port: Option<u16>,
+    pub tls: Option<TlsConfig>,
+    pub static_files: Option<StaticConfig>,
+}
+
+impl ResolveEnvCredentials for RoutingConfig {
+    type Output = ResolvedRoutingConfig;
+
+    fn resolved_credentials(&self) -> Result<Self::Output, elevon_config::ConfigError> {
+        let port = self
+            .port
+            .as_ref()
+            .map(|port| -> Result<u16> {
+                match port {
+                    PortConfig::Literal(port) => Ok(*port),
+                    PortConfig::Env(key) => {
+                        let value =
+                            resolve_env_or_literal(key).map_err(|e| ConfigError::InvalidValue {
+                                field: "routing.port_env".to_string(),
+                                value: e.to_string(),
+                            })?;
+                        let port = value
+                            .parse::<u16>()
+                            .map_err(|_| ConfigError::InvalidValue {
+                                field: "routing.port".to_string(),
+                                value,
+                            })?;
+                        Ok(port)
+                    }
+                }
+            })
+            .transpose()
+            .map_err(|e| ConfigError::InvalidValue {
+                field: "routing.port".to_string(),
+                value: e.to_string(),
+            })?;
+
+        Ok(ResolvedRoutingConfig {
+            domain: self.domain.clone(),
+            port,
+            tls: self.tls.clone(),
+            static_files: self.static_files.clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StaticConfig {
+    pub dir: String,
+    /// Index file name that will be served as root
+    #[serde(default = "StaticConfig::default_index")]
+    pub index: String,
+    /// Domain path that the directory will be served at
+    pub path: Option<String>,
+}
+
+impl StaticConfig {
+    fn default_index() -> String {
+        "index.html".to_string()
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum BuildConfig {
+    Path(String),
+    Options(BuildOptions),
+}
+
+impl Default for BuildConfig {
+    fn default() -> Self {
+        BuildConfig::Path(".".to_string())
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct BuildOptions {
+    pub path: String,
+    pub dockerfile: Option<String>,
+}
+
+impl Default for BuildOptions {
+    fn default() -> Self {
+        Self {
+            path: ".".to_string(),
+            dockerfile: None,
+        }
     }
 }
 

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use bollard::plugin::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum};
-use elevon_contracts::deploy::{StreamEvent, WebApp};
+use elevon_contracts::deploy::{StaticApp, StreamEvent, WebApp};
 use tokio::sync::RwLock;
 
 use crate::api::db::AgentDb;
@@ -71,11 +71,16 @@ impl ApiState {
         for mut deployment in deployments {
             let app = deployment.app.get();
 
-            let (Some(container_id), Some(web_deployment)) =
-                (deployment.container_id.clone(), deployment.web.clone())
-            else {
+            let Some(container_id) = deployment.container_id.clone() else {
                 continue;
             };
+
+            if deployment.web.is_none() || deployment.static_web.is_none() {
+                continue;
+            }
+
+            let (web_deployment, static_web_deployment) =
+                (deployment.web.clone(), deployment.static_web.clone());
 
             let app_name = app.name.clone();
             let project_name = app.project.clone();
@@ -93,9 +98,15 @@ impl ApiState {
                 continue;
             }
 
-            let web_app = Some(WebApp {
-                domain: web_deployment.domain,
-                port: web_deployment.port,
+            let web_app = web_deployment.map(|w| WebApp {
+                domain: w.domain,
+                port: w.port,
+            });
+
+            let static_app = static_web_deployment.map(|s| StaticApp {
+                domain: s.domain,
+                directory: s.directory,
+                path: s.path,
             });
 
             let route_config = DeployAppData {
@@ -105,6 +116,7 @@ impl ApiState {
                 status: deployment_status,
                 container_id,
                 web_app,
+                static_app,
             };
 
             routes.push(route_config);
@@ -225,7 +237,7 @@ impl ApiState {
 
                 logger.log_event(
                         StreamEvent::warn(
-                            format!("[{log_id}] Container path health check failed, retrying (retries {}/{})...", 
+                            format!("[{log_id}] Container path health check failed, retrying (retries {}/{})...",
                                 attempt,
                                 healthcheck.retries
                             )
