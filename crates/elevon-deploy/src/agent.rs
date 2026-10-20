@@ -150,11 +150,7 @@ pub fn prepare_apps_deploy_payload(
                     if let Some(static_files) = resolved_routing.static_files {
                         (
                             None,
-                            Some(StaticApp {
-                                domain: resolved_routing.domain,
-                                directory: static_files.dir,
-                                path: static_files.path,
-                            }),
+                            Some(static_files.to_static_app(resolved_routing.domain)),
                         )
                     } else {
                         if let Some(port) = resolved_routing.port {

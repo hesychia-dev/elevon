@@ -6,8 +6,8 @@ use tower_http::services::ServeDir;
 
 #[derive(Debug)]
 pub struct ElevonServe {
-    router: Router,
     pub domains: ArcSwap<HashMap<String, DirectoryDomainInfo>>,
+    router: Router,
 }
 
 impl ElevonServe {

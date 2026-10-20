@@ -385,21 +385,8 @@ async fn deploy_app(
         project: app_config.project.to_string(),
         name: app_config.name.to_string(),
         container_id: new_container_id,
-        web_app: match web_deployment {
-            Some(web) => Some(WebApp {
-                port: web.port,
-                domain: web.domain,
-            }),
-            _ => None,
-        },
-        static_app: match static_web_deployment {
-            Some(static_web) => Some(StaticApp {
-                domain: static_web.domain,
-                directory: static_web.directory,
-                path: static_web.path,
-            }),
-            _ => None,
-        },
+        web_app: web_deployment.map(|w| WebApp::from(&w)),
+        static_app: static_web_deployment.map(|s| StaticApp::from(&s)),
         status: DeploymentStatus::Active,
     };
 

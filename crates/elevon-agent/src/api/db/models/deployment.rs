@@ -2,7 +2,9 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
-use elevon_contracts::deploy::{AppHealthCheckConfig, AppPayload, AppRuntimeOptions, WebApp};
+use elevon_contracts::deploy::{
+    AppHealthCheckConfig, AppPayload, AppRuntimeOptions, StaticApp, WebApp,
+};
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 use tabled::Tabled;
@@ -63,6 +65,7 @@ impl Deployment {
             Some(static_app) => Some(DeploymentStaticWeb {
                 domain: static_app.domain.clone(),
                 directory: static_app.directory.clone(),
+                index: static_app.index.clone(),
                 path: static_app.path.clone(),
             }),
             None => None,
@@ -157,18 +160,30 @@ pub struct DeploymentWeb {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, toasty::Embed)]
-pub struct DeploymentStaticWeb {
-    pub domain: String,
-    pub directory: String,
-    pub path: Option<String>,
-}
-
 impl From<&DeploymentWeb> for WebApp {
     fn from(value: &DeploymentWeb) -> Self {
         Self {
             domain: value.domain.clone(),
             port: value.port,
+        }
+    }
+}
+
+#[derive(Debug, Clone, toasty::Embed)]
+pub struct DeploymentStaticWeb {
+    pub domain: String,
+    pub directory: String,
+    pub index: String,
+    pub path: Option<String>,
+}
+
+impl From<&DeploymentStaticWeb> for StaticApp {
+    fn from(value: &DeploymentStaticWeb) -> Self {
+        Self {
+            domain: value.domain.clone(),
+            directory: value.directory.clone(),
+            index: value.index.clone(),
+            path: value.path.clone(),
         }
     }
 }

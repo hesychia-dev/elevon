@@ -126,6 +126,7 @@ pub struct WebApp {
 pub struct StaticApp {
     pub domain: String,
     pub directory: String,
+    pub index: String,
     pub path: Option<String>,
 }
 

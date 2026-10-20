@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use elevon_config::{ConfigError, ElevonConfig, ResolveEnvCredentials, resolve_env_or_literal};
-use elevon_contracts::deploy::{AppRole, TlsConfig};
+use elevon_contracts::deploy::{AppRole, StaticApp, TlsConfig};
 use serde::Deserialize;
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
@@ -279,6 +279,15 @@ pub struct StaticConfig {
 impl StaticConfig {
     fn default_index() -> String {
         "index.html".to_string()
+    }
+
+    pub fn to_static_app(&self, domain: String) -> StaticApp {
+        StaticApp {
+            domain,
+            directory: self.dir.clone(),
+            index: self.index.clone(),
+            path: self.path.clone(),
+        }
     }
 }
 

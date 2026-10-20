@@ -98,25 +98,14 @@ impl ApiState {
                 continue;
             }
 
-            let web_app = web_deployment.map(|w| WebApp {
-                domain: w.domain,
-                port: w.port,
-            });
-
-            let static_app = static_web_deployment.map(|s| StaticApp {
-                domain: s.domain,
-                directory: s.directory,
-                path: s.path,
-            });
-
             let route_config = DeployAppData {
                 id: deployment.id.to_string(),
                 project: project_name,
                 name: app_name,
                 status: deployment_status,
                 container_id,
-                web_app,
-                static_app,
+                web_app: web_deployment.map(|w| WebApp::from(&w)),
+                static_app: static_web_deployment.map(|s| StaticApp::from(&s)),
             };
 
             routes.push(route_config);
