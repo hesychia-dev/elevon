@@ -103,7 +103,7 @@ impl ApiState {
                 project: project_name,
                 name: app_name,
                 status: deployment_status,
-                container_id,
+                container_id: Some(container_id),
                 web_app: web_deployment.map(|w| WebApp::from(&w)),
                 static_app: static_web_deployment.map(|s| StaticApp::from(&s)),
             };

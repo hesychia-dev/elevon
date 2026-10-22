@@ -1,11 +1,12 @@
-use std::{collections::HashSet, sync::LazyLock};
+use std::{collections::HashSet, io::Cursor, sync::LazyLock};
 
 use anyhow::Result;
 use bollard::{
     auth::DockerCredentials,
     plugin::{ContainerCreateBody, HostConfig, PortBinding, PortMap, RestartPolicy},
     query_parameters::{
-        CreateContainerOptionsBuilder, CreateImageOptionsBuilder, RemoveImageOptions,
+        CreateContainerOptionsBuilder, CreateImageOptionsBuilder, DownloadFromContainerOptions,
+        RemoveContainerOptions, RemoveImageOptions,
     },
 };
 use elevon_contracts::deploy::{
@@ -13,9 +14,12 @@ use elevon_contracts::deploy::{
     AppRuntimeOptions, StaticApp, StreamEvent, StreamLogLevel, TlsType, WebApp,
 };
 use elevon_fs::agent::{
-    AppEnvOptions, TlsOptions, add_app_env, load_app_env, load_app_string_env, write_tls_file,
+    AgentPath, AppEnvOptions, TlsOptions, add_app_env, load_app_env, load_app_string_env,
+    write_tls_file,
 };
 use futures_util::TryStreamExt;
+use futures_util::stream::StreamExt;
+use tar::Archive;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -472,7 +476,25 @@ async fn pull_image_and_run_container(
         write_tls_file(tls.key.as_bytes(), TlsType::Key, tls_options)?;
     }
 
-    if let Some(static_app) = options.app_config.static_app.as_ref() {}
+    if let Some(static_app) = options.app_config.static_app.as_ref() {
+        handle_static_app_deployment(
+            &state.docker,
+            &options.app_config.image_ref,
+            &options.app_config.name,
+            &deployment.id.to_string(),
+            static_app,
+        )
+        .await?;
+
+        deployment
+            .update()
+            .status(DeploymentStatus::Active)
+            .exec(options.db_tx)
+            .await?;
+
+        // TODO: Add log
+        return Ok(deployment);
+    }
 
     let container_id = run_container(
         &state.docker,
@@ -544,7 +566,56 @@ async fn pull_image_and_run_container(
     Ok(res)
 }
 
-async fn handle_static_app_deployment() {}
+async fn handle_static_app_deployment(
+    docker: &bollard::Docker,
+    image_reference: &str,
+    app_name: &str,
+    deployment_id: &str,
+    static_app: &StaticApp,
+) -> Result<()> {
+    let out_dir = AgentPath::AppStaticDir(app_name.to_string(), deployment_id.to_string())
+        .ensure_parent_dir()?;
+
+    let tmp_name = format!("{}-{}-tmp", app_name, deployment_id);
+
+    let options = CreateContainerOptionsBuilder::default()
+        .name(&tmp_name)
+        .build();
+    let config = ContainerCreateBody {
+        image: Some(image_reference.to_string()),
+        cmd: Some(vec!["x".to_string()]),
+        ..Default::default()
+    };
+
+    let container = docker.create_container(Some(options), config).await?;
+
+    let downlod_options = DownloadFromContainerOptions {
+        path: static_app.directory.to_string(),
+    };
+
+    let mut stream = docker.download_from_container(&container.id, Some(downlod_options));
+    let mut tar_bytes = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        let data = chunk.expect("Error downloading file chunk");
+        tar_bytes.extend_from_slice(&data);
+    }
+
+    let cursor = Cursor::new(tar_bytes);
+    let mut archive = Archive::new(cursor);
+
+    archive.unpack(out_dir).expect("Failed to untar files");
+
+    let remove_options = RemoveContainerOptions {
+        force: true, // Forces removal even if it's somehow stuck running
+        ..Default::default()
+    };
+    docker
+        .remove_container(&container.id, Some(remove_options))
+        .await?;
+
+    Ok(())
+}
 
 async fn rollback_with_app(
     tx: &StreamSender,

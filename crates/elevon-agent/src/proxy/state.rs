@@ -250,7 +250,7 @@ impl ProxyState {
                 let backends = next.entry(web_app.domain.clone()).or_default();
 
                 for backend in backends.iter_mut() {
-                    if backend.container_id == container_id {
+                    if backend.container_id.as_deref() == Some(&container_id) {
                         backend.status = DeploymentStatus::Drained;
                     }
                 }
@@ -356,7 +356,7 @@ impl ProxyState {
                 .filter(|(_, routes)| {
                     routes
                         .iter()
-                        .any(|route| route.container_id == container_id)
+                        .any(|route| route.container_id.as_deref() == Some(container_id))
                 })
                 .map(|(domain, _)| domain.clone())
                 .collect();
@@ -365,7 +365,8 @@ impl ProxyState {
                 let mut next = current.as_ref().clone();
 
                 for backends in next.values_mut() {
-                    backends.retain(|backend| backend.container_id != container_id);
+                    backends
+                        .retain(|backend| backend.container_id.as_deref() != Some(container_id));
                 }
 
                 next.retain(|_, backends| !backends.is_empty());
