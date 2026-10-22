@@ -113,14 +113,22 @@ impl ProxyState {
     }
 
     pub fn upsert_route(&self, route: DeployAppData) {
-        let Some(web_app) = route.web_app.clone() else {
+        let (domain, port) = match &route.web_app {
+            Some(web_app) => (Some(web_app.domain.clone()), Some(web_app.port)),
+            None => match &route.static_app {
+                Some(static_app) => (Some(static_app.domain.clone()), None),
+                None => (None, None),
+            },
+        };
+
+        let Some(domain) = domain else {
             tracing::warn!(app = %&route.name, "refusing application route on non web app");
             return;
         };
 
-        if web_app.domain == self.agent.domain {
+        if domain == self.agent.domain {
             tracing::warn!(
-                domain = %web_app.domain,
+                domain = %domain,
                 "refusing application route on reserved agent domain"
             );
             return;
@@ -128,7 +136,7 @@ impl ProxyState {
 
         if route.status != DeploymentStatus::Active {
             tracing::debug!(
-                domain = %web_app.domain,
+                domain = %domain,
                 status = ?route.status,
                 "skipping inactive application route"
             );
@@ -137,13 +145,13 @@ impl ProxyState {
 
         self.routes.rcu(|current| {
             let mut next = current.as_ref().clone();
-            let backends = next.entry(web_app.domain.clone()).or_default();
+            let backends = next.entry(domain.clone()).or_default();
 
             self.dynamic_cert
-                .add_cert(&route.project, &route.name, web_app.domain.clone())
+                .add_cert(&route.project, &route.name, domain.clone())
                 .unwrap_or_else(|err| {
                     tracing::error!(
-                        domain = %web_app.domain,
+                        domain = %domain,
                         status = ?route.status,
                         error = %err,
                         "failed to save/update certificates"
@@ -159,13 +167,18 @@ impl ProxyState {
             next
         });
 
+        // Getting to this means that its a static app so we don't need to touch LB
+        let Some(port) = port else {
+            return;
+        };
+
         let routes = self.routes.load();
-        let backends = routes.get(&web_app.domain).cloned().unwrap_or_default();
+        let backends = routes.get(&domain).cloned().unwrap_or_default();
 
         let addrs: Vec<String> = backends
             .iter()
             .filter(|b| b.status == DeploymentStatus::Active)
-            .map(|_| format!("127.0.0.1:{}", web_app.port))
+            .map(|_| format!("127.0.0.1:{}", port))
             .collect();
 
         let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(addrs).expect("valid backends");
@@ -175,7 +188,7 @@ impl ProxyState {
 
         self.lbs.rcu(|current| {
             let mut next = (**current).clone();
-            next.insert(web_app.domain.clone(), lb.clone());
+            next.insert(domain.clone(), lb.clone());
             next
         });
 
@@ -363,5 +376,21 @@ impl ProxyState {
                 self.rebuild_load_balancer(domain);
             }
         }
+    }
+
+    pub fn handle_static_app_request(&self, host: Option<&str>, path: &str) -> Option<bool> {
+        let host = host?;
+
+        let guard = self.routes.load();
+        let routes = guard.get(host)?;
+
+        let static_app = routes.iter().find_map(|route| {
+            route
+                .static_app
+                .as_ref()
+                .filter(|app| app.path.as_deref().is_none_or(|p| path.starts_with(p)))
+        })?;
+
+        Some(true)
     }
 }

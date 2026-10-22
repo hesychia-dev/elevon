@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bollard::plugin::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum};
 use elevon_contracts::deploy::{StaticApp, StreamEvent, WebApp};
 use tokio::sync::RwLock;
@@ -75,7 +75,7 @@ impl ApiState {
                 continue;
             };
 
-            if deployment.web.is_none() || deployment.static_web.is_none() {
+            if deployment.web.is_none() && deployment.static_web.is_none() {
                 continue;
             }
 
@@ -190,14 +190,18 @@ impl ApiState {
     ) -> Result<()> {
         let log_id = app_name.unwrap_or(container_id);
 
+        let start_period = Duration::from_secs(healthcheck.start_period);
         let timeout_duration = Duration::from_secs(healthcheck.timeout);
         let interval_duration = Duration::from_secs(healthcheck.interval);
         let stabilization_duration = Duration::from_secs(healthcheck.stabilization);
 
         let start_time = Instant::now();
         let mut consecutive_successes = 0;
+        let mut attempt = 0;
 
-        for attempt in 1..=healthcheck.retries {
+        while attempt < healthcheck.retries {
+            attempt += 1;
+
             let check_result =
                 tokio::time::timeout(timeout_duration, self.is_container_healthy(container_id))
                     .await;
@@ -218,18 +222,23 @@ impl ApiState {
             consecutive_successes += 1;
 
             // Check the HTTP path health
-            let path_healthy =
-                is_container_path_healthy(log_id, healthcheck, logger, &container).await?;
+            let path_healthy = is_container_path_healthy(log_id, healthcheck, logger, &container)
+                .await
+                .unwrap_or_default();
 
             if !path_healthy {
                 consecutive_successes = 0;
 
+                if start_time.elapsed() < start_period {
+                    attempt -= 1;
+                    tokio::time::sleep(interval_duration).await;
+                    continue;
+                }
+
                 logger.log_event(
-                        StreamEvent::warn(
                             format!("[{log_id}] Container path health check failed, retrying (retries {}/{})...",
                                 attempt,
                                 healthcheck.retries
-                            )
                         ).into()
                     ).await?;
 
@@ -240,6 +249,15 @@ impl ApiState {
 
                 continue;
             }
+
+            logger
+                .log_event(
+                    format!(
+                        "[{log_id}] Healthcheck passed. Waiting for the container to stabilize"
+                    )
+                    .into(),
+                )
+                .await?;
 
             // Sleeping for the <stabilization_duration> just to wait it out.
             // TODO: Also we could check the health once again after this.
@@ -295,7 +313,7 @@ async fn is_container_path_healthy(
             && let Some(ports) = &network_settings.ports
         {
             // This is a bit tricky but currently
-            // a container can be binded to one host/port, and the host is always 0.0.0.0 currently.
+            // a container can be binded to only one host/port, and the host is always 0.0.0.0 currently.
             if let Some(first_port) = ports.iter().next()
                 && let Some(bindings) = first_port.1
                 && let Some(first_bind) = bindings.first()
@@ -311,9 +329,9 @@ async fn is_container_path_healthy(
                         .unwrap_or(healthcheck_path)
                 );
 
-                let res = reqwest::get(healthcheck_url)
+                let res = reqwest::get(healthcheck_url.clone())
                     .await
-                    .context("healthcheck path request failed")?;
+                    .map_err(|e| anyhow::anyhow!("path healthcheck failed: {}", e))?;
 
                 let status = res.status();
                 if status.is_server_error() || status.is_client_error() {

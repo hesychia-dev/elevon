@@ -60,12 +60,13 @@ env:
 #   api:
 #     role: web
 #     healthcheck:
+#       start_period: 5  # Seconds after start during which failed checks don't count as retries
 #       interval: 5  # The number of seconds between container health checks during deployments
 #       timeout: 30  # The number of seconds the deployment waits for a container to respond to the health check
 #       retries: 3
 #       stabilization: 5  # The number of seconds deployment waits until the container is considered as healthy
 #       required_successes: 1
-#       path: /health
+#       path: /health  # HTTP endpoint to send the request to for additional health check
 #   worker:
 #     role: worker
 #     cmd: "deno run worker.ts"

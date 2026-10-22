@@ -180,6 +180,9 @@ pub struct AppDeployPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppHealthCheckConfig {
+    #[serde(default = "AppHealthCheckConfig::default_start_period")]
+    pub start_period: u64,
+
     #[serde(default = "AppHealthCheckConfig::default_interval")]
     pub interval: u64,
 
@@ -199,6 +202,10 @@ pub struct AppHealthCheckConfig {
 }
 
 impl AppHealthCheckConfig {
+    pub fn default_start_period() -> u64 {
+        5
+    }
+
     fn default_interval() -> u64 {
         5
     }
@@ -223,6 +230,7 @@ impl AppHealthCheckConfig {
 impl Default for AppHealthCheckConfig {
     fn default() -> Self {
         Self {
+            start_period: AppHealthCheckConfig::default_start_period(),
             interval: AppHealthCheckConfig::default_interval(),
             timeout: AppHealthCheckConfig::default_timeout(),
             retries: AppHealthCheckConfig::default_retries(),

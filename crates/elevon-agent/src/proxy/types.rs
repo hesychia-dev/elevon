@@ -1,4 +1,4 @@
-use std::{sync::atomic::AtomicUsize, time::Instant};
+use std::{path::PathBuf, sync::atomic::AtomicUsize, time::Instant};
 
 use elevon_contracts::deploy::{StaticApp, WebApp};
 use serde::{Deserialize, Serialize};
@@ -18,9 +18,9 @@ pub struct DeployAppData {
     pub project: String,
     pub name: String,
     pub status: DeploymentStatus,
-    pub container_id: String,
+    pub container_id: Option<String>,
     pub web_app: Option<WebApp>,
-    pub static_app: Option<StaticApp>
+    pub static_app: Option<StaticApp>,
 }
 
 #[derive(Debug, Default)]
@@ -35,4 +35,10 @@ pub struct BackendRuntime {
     pub container_id: String,
     pub status: DeploymentStatus,
     pub route: Option<RouteBackendRuntime>,
+}
+
+#[derive(Debug)]
+pub struct StaticAppResponseData {
+    pub file_path: PathBuf,
+    pub mime_type: String,
 }

@@ -47,10 +47,10 @@ pub struct Deployment {
 }
 
 impl Deployment {
-    pub async fn create_deployment(
-        db: &mut toasty::Db,
-        app: App,
-        payload: AppPayload,
+    pub async fn create_deployment<'a>(
+        db: &mut toasty::Transaction<'a>,
+        app: &'a App,
+        payload: &'a AppPayload,
         port: Option<u16>,
     ) -> Result<Self> {
         let web = match (&payload.web_app, port) {
@@ -61,15 +61,12 @@ impl Deployment {
             _ => None,
         };
 
-        let static_web = match &payload.static_app {
-            Some(static_app) => Some(DeploymentStaticWeb {
-                domain: static_app.domain.clone(),
-                directory: static_app.directory.clone(),
-                index: static_app.index.clone(),
-                path: static_app.path.clone(),
-            }),
-            None => None,
-        };
+        let static_web = payload.static_app.as_ref().map(|s| DeploymentStaticWeb {
+            domain: s.domain.clone(),
+            directory: s.directory.clone(),
+            index: s.index.clone(),
+            path: s.path.clone(),
+        });
 
         let deployment = Deployment::create()
             .app_id(app.id)
@@ -292,6 +289,7 @@ impl From<&DeploymentRuntimeOptions> for AppRuntimeOptions {
 
 #[derive(Debug, toasty::Embed)]
 pub struct DeploymentHealthCheck {
+    pub start_period: u64,
     pub interval: u64,
     pub timeout: u64,
     pub retries: u64,
@@ -310,6 +308,7 @@ impl Default for DeploymentHealthCheck {
 impl From<&AppHealthCheckConfig> for DeploymentHealthCheck {
     fn from(value: &AppHealthCheckConfig) -> Self {
         Self {
+            start_period: value.start_period,
             interval: value.interval,
             timeout: value.timeout,
             retries: value.retries,
@@ -323,6 +322,7 @@ impl From<&AppHealthCheckConfig> for DeploymentHealthCheck {
 impl From<&DeploymentHealthCheck> for AppHealthCheckConfig {
     fn from(value: &DeploymentHealthCheck) -> Self {
         Self {
+            start_period: value.start_period,
             interval: value.interval,
             timeout: value.timeout,
             retries: value.retries,

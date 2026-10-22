@@ -269,9 +269,11 @@ impl ResolveEnvCredentials for RoutingConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StaticConfig {
     pub dir: String,
+
     /// Index file name that will be served as root
     #[serde(default = "StaticConfig::default_index")]
     pub index: String,
+
     /// Domain path that the directory will be served at
     pub path: Option<String>,
 }

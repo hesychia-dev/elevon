@@ -21,10 +21,7 @@ use uuid::Uuid;
 
 use crate::{
     api::{
-        db::models::{
-            App, Deployment, DeploymentOption, DeploymentRuntimeOptions, DeploymentStatus,
-            deployment::{DeploymentHealthCheck, DeploymentWeb},
-        },
+        db::models::{App, Deployment, DeploymentStatus, deployment::DeploymentHealthCheck},
         state::SharedApiState,
         stream::{StreamSender, emit},
     },
@@ -341,31 +338,7 @@ async fn deploy_app(
 
     let deployment = match deployment_to_run {
         Some(v) => v,
-        None => {
-            let deployment_web = match (&app_config.web_app, new_port) {
-                (Some(web_app), Some(new_port)) => Some(DeploymentWeb {
-                    domain: web_app.domain.clone(),
-                    port: new_port,
-                }),
-                _ => None,
-            };
-
-            let deployment = Deployment::create()
-                .app_id(db_app.id)
-                .web(deployment_web)
-                .exec(&mut db_tx)
-                .await?;
-
-            let runtime_options = DeploymentRuntimeOptions::from(&app_config.runtime_options);
-
-            DeploymentOption::create()
-                .deployment_id(deployment.id)
-                .runtime(runtime_options)
-                .exec(&mut db_tx)
-                .await?;
-
-            deployment
-        }
+        None => Deployment::create_deployment(&mut db_tx, &db_app, &app_config, new_port).await?,
     };
 
     let web_deployment = deployment.web.clone();
@@ -377,14 +350,13 @@ async fn deploy_app(
         app_config: &app_config,
     };
 
-    let (new_deployment, new_container_id) =
-        pull_image_and_run_container(tx, &state, deployment, options).await?;
+    let new_deployment = pull_image_and_run_container(tx, &state, deployment, options).await?;
 
     let app_data = DeployAppData {
         id: new_deployment.id.to_string(),
         project: app_config.project.to_string(),
         name: app_config.name.to_string(),
-        container_id: new_container_id,
+        container_id: new_deployment.container_id,
         web_app: web_deployment.map(|w| WebApp::from(&w)),
         static_app: static_web_deployment.map(|s| StaticApp::from(&s)),
         status: DeploymentStatus::Active,
@@ -474,7 +446,7 @@ async fn pull_image_and_run_container(
     state: &SharedApiState,
     mut deployment: Deployment,
     options: PullImageAndRunContainerOptions<'_, '_>,
-) -> Result<(Deployment, String)> {
+) -> Result<Deployment> {
     prepare_env_variables(options.app_config, &deployment.id.to_string())?;
 
     let pull_image_options = PullImageOptions {
@@ -499,6 +471,8 @@ async fn pull_image_and_run_container(
         write_tls_file(tls.cert.as_bytes(), TlsType::Cert, tls_options.clone())?;
         write_tls_file(tls.key.as_bytes(), TlsType::Key, tls_options)?;
     }
+
+    if let Some(static_app) = options.app_config.static_app.as_ref() {}
 
     let container_id = run_container(
         &state.docker,
@@ -563,11 +537,14 @@ async fn pull_image_and_run_container(
                 .exec(options.db_tx)
                 .await?;
 
-            Ok((deployment, container_id))
+            Ok(deployment)
         }
     }?;
+
     Ok(res)
 }
+
+async fn handle_static_app_deployment() {}
 
 async fn rollback_with_app(
     tx: &StreamSender,
