@@ -122,6 +122,14 @@ pub struct WebApp {
     pub domain: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticApp {
+    pub domain: String,
+    pub directory: String,
+    pub index: String,
+    pub path: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppRuntimeOptions {
@@ -162,6 +170,7 @@ pub struct AppPayload {
     pub vars: Option<HashMap<String, String>>,
     pub tls: Option<TlsConfig>,
     pub web_app: Option<WebApp>,
+    pub static_app: Option<StaticApp>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -171,6 +180,9 @@ pub struct AppDeployPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppHealthCheckConfig {
+    #[serde(default = "AppHealthCheckConfig::default_start_period")]
+    pub start_period: u64,
+
     #[serde(default = "AppHealthCheckConfig::default_interval")]
     pub interval: u64,
 
@@ -190,6 +202,10 @@ pub struct AppHealthCheckConfig {
 }
 
 impl AppHealthCheckConfig {
+    pub fn default_start_period() -> u64 {
+        5
+    }
+
     fn default_interval() -> u64 {
         5
     }
@@ -214,6 +230,7 @@ impl AppHealthCheckConfig {
 impl Default for AppHealthCheckConfig {
     fn default() -> Self {
         Self {
+            start_period: AppHealthCheckConfig::default_start_period(),
             interval: AppHealthCheckConfig::default_interval(),
             timeout: AppHealthCheckConfig::default_timeout(),
             retries: AppHealthCheckConfig::default_retries(),

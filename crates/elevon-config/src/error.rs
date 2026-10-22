@@ -7,7 +7,7 @@ pub enum ConfigError {
         source: std::io::Error,
     },
     #[error("failed to parse config")]
-    Parse(#[from] serde_yml::Error),
+    Parse(#[from] noyalib::Error),
     #[error("environment variable `{name}` is not set")]
     MissingEnv { name: String },
     #[error("invalid value for `{field}`: `{value}`")]

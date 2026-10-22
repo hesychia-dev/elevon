@@ -23,7 +23,7 @@ where
     Self: 'static,
 {
     fn from_str(yaml: &str) -> Result<Self, ConfigError> {
-        let config: Self = serde_yml::from_str(yaml)?;
+        let config: Self = noyalib::from_str(yaml)?;
         Ok(config)
     }
 
@@ -51,14 +51,14 @@ pub fn deserialize_string_map<'de, D>(deserializer: D) -> Result<HashMap<String,
 where
     D: Deserializer<'de>,
 {
-    let raw: HashMap<String, serde_yml::Value> = HashMap::deserialize(deserializer)?;
+    let raw: HashMap<String, noyalib::Value> = HashMap::deserialize(deserializer)?;
     raw.into_iter()
         .map(|(k, v)| {
             let s = match v {
-                serde_yml::Value::String(s) => s,
-                serde_yml::Value::Number(n) => n.to_string(),
-                serde_yml::Value::Bool(b) => b.to_string(),
-                serde_yml::Value::Null => String::new(),
+                noyalib::Value::String(s) => s,
+                noyalib::Value::Number(n) => n.to_string(),
+                noyalib::Value::Bool(b) => b.to_string(),
+                noyalib::Value::Null => String::new(),
                 other => {
                     return Err(serde::de::Error::custom(format!(
                         "env var `{k}` must be a scalar, got {other:?}"
