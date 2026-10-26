@@ -215,6 +215,8 @@ async fn deploy_app(
     };
     let deployment_to_drain_id = deployment_to_drain.as_ref().map(|d| d.id);
 
+    // TODO: Static app draining 
+
     // Marks the current deployment as draining, so no new requests will be handled by it,
     // and later the DrainJanitor service will terminate the container.
     if let Some(deployment_to_drain) = deployment_to_drain
