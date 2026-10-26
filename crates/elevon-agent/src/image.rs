@@ -215,7 +215,8 @@ async fn deploy_app(
     };
     let deployment_to_drain_id = deployment_to_drain.as_ref().map(|d| d.id);
 
-    // TODO: Static app draining 
+    // TODO: Static app draining
+    // Deploying second time doesnt actually create files, it just creates the Deployment in db
 
     // Marks the current deployment as draining, so no new requests will be handled by it,
     // and later the DrainJanitor service will terminate the container.
