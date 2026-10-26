@@ -20,7 +20,7 @@ use crate::{
         tls::DynamicCert,
         types::{BackendRuntime, DeployAppData, RouteBackendRuntime},
     },
-    socket::{Socket, UnixClient},
+    socket::{Socket, SocketType, UnixClient},
 };
 
 pub struct AgentState {
@@ -56,7 +56,7 @@ impl ProxyState {
             port: env.agent_port,
         };
 
-        let proxy_socket = Socket::new(false)?;
+        let proxy_socket = Socket::new(SocketType::Proxy, false)?;
 
         Ok(Arc::new(ProxyState {
             agent: agent_state,

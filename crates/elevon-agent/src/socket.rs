@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::os::unix::fs::PermissionsExt;
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
@@ -14,7 +13,7 @@ use tokio_util::codec::{Framed, FramedWrite, LengthDelimitedCodec};
 
 pub enum SocketType {
     Proxy,
-    Api,
+    Agent,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -30,8 +29,12 @@ pub struct Socket {
 }
 
 impl Socket {
-    pub fn new(delete: bool) -> Result<Self> {
-        let path = AgentPath::ProxySocket.ensure_parent_dir()?;
+    pub fn new(socket_type: SocketType, delete: bool) -> Result<Self> {
+        let path = match socket_type {
+            SocketType::Proxy => AgentPath::ProxySocket,
+            SocketType::Agent => AgentPath::AgentSocket,
+        }
+        .ensure_parent_dir()?;
 
         if path.exists() && delete {
             match std::fs::remove_file(&path) {
@@ -70,7 +73,7 @@ impl Socket {
         let listener = UnixListener::bind(&self.path)
             .with_context(|| format!("failed to bind {}", self.path.display()))?;
 
-        std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o660))?;
+        AgentPath::restrict_permissions(&self.path)?;
 
         let handler = Arc::new(handler);
 
@@ -175,7 +178,7 @@ pub struct UnixClient {
 
 impl UnixClient {
     pub fn new() -> Result<Self> {
-        let socket = Socket::new(false)?;
+        let socket = Socket::new(SocketType::Agent, false)?;
         let client = reqwest::Client::builder()
             .unix_socket(socket.path)
             .build()?;
