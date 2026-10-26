@@ -29,7 +29,7 @@ impl ApiState {
         let docker = bollard::Docker::connect_with_defaults()?;
         let env = RwLock::new(env.clone());
 
-        let proxy_socket = Socket::new(SocketType::Agent, true)?;
+        let proxy_socket = Socket::new(SocketType::Proxy, true)?;
 
         let state = Self {
             db,
