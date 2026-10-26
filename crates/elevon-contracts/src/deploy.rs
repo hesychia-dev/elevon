@@ -253,19 +253,10 @@ pub struct AppRollbackPayload {
     pub deployment_ids: Vec<String>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TlsType {
     Cert,
     Key,
-}
-
-impl TlsType {
-    pub fn get_file(&self) -> &str {
-        match self {
-            TlsType::Cert => "cert.pem",
-            TlsType::Key => "key.pem",
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -273,4 +264,45 @@ pub struct AppStopPayload {
     pub project: Option<String>,
     pub apps: Vec<String>,
     pub force: bool,
+}
+
+#[derive(Debug)]
+pub struct RegistryVars {
+    pub server: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl RegistryVars {
+    pub const KEY_SERVER: &'static str = "REGISTRY_SERVER";
+    pub const KEY_USERNAME: &'static str = "REGISTRY_USERNAME";
+    pub const KEY_PASSWORD: &'static str = "REGISTRY_PASSWORD";
+
+    pub fn resolve_env_vars(&self) -> HashMap<String, String> {
+        HashMap::from([
+            (Self::KEY_SERVER.to_string(), self.server.clone()),
+            (Self::KEY_USERNAME.to_string(), self.username.clone()),
+            (Self::KEY_PASSWORD.to_string(), self.password.clone()),
+        ])
+    }
+
+    pub fn get_from_vars(vars: &mut HashMap<String, String>) -> Result<Self> {
+        let server = vars
+            .remove(Self::KEY_SERVER)
+            .ok_or_else(|| anyhow::anyhow!("Missing environment variable: {}", Self::KEY_SERVER))?;
+
+        let username = vars.remove(Self::KEY_USERNAME).ok_or_else(|| {
+            anyhow::anyhow!("Missing environment variable: {}", Self::KEY_USERNAME)
+        })?;
+
+        let password = vars.remove(Self::KEY_PASSWORD).ok_or_else(|| {
+            anyhow::anyhow!("Missing environment variable: {}", Self::KEY_PASSWORD)
+        })?;
+
+        Ok(Self {
+            server,
+            username,
+            password,
+        })
+    }
 }

@@ -30,11 +30,8 @@ pub struct Socket {
 }
 
 impl Socket {
-    pub fn new(ty: SocketType, delete: bool) -> Result<Self> {
-        let path = match ty {
-            SocketType::Proxy => AgentPath::ProxySocket.ensure_parent_dir()?,
-            SocketType::Api => AgentPath::ApiSocket.ensure_parent_dir()?,
-        };
+    pub fn new(delete: bool) -> Result<Self> {
+        let path = AgentPath::ProxySocket.ensure_parent_dir()?;
 
         if path.exists() && delete {
             match std::fs::remove_file(&path) {
@@ -178,7 +175,7 @@ pub struct UnixClient {
 
 impl UnixClient {
     pub fn new() -> Result<Self> {
-        let socket = Socket::new(SocketType::Api, false)?;
+        let socket = Socket::new(false)?;
         let client = reqwest::Client::builder()
             .unix_socket(socket.path)
             .build()?;

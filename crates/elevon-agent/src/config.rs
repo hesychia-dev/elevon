@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use elevon_config::ElevonConfig;
 use elevon_contracts::deploy::{TlsConfig, TlsType};
-use elevon_fs::agent::{TlsOptions, write_tls_file};
+use elevon_fs::agent::{AppEnvOptions, tls::write_tls_file};
 use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Deserialize)]
@@ -73,10 +73,7 @@ impl Config {
             let cert_bytes = std::fs::read(tls.cert.clone())?;
             let key_bytes = std::fs::read(tls.key.clone())?;
 
-            let options = TlsOptions {
-                project: "agent".to_string(),
-                app: None,
-            };
+            let options = AppEnvOptions::agent();
 
             write_tls_file(&cert_bytes, TlsType::Cert, options.clone())?;
             write_tls_file(&key_bytes, TlsType::Key, options)?;

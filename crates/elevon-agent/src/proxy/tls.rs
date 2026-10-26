@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use elevon_contracts::deploy::TlsType;
-use elevon_fs::agent::TlsOptions;
+use elevon_fs::agent::AppEnvOptions;
+use elevon_fs::agent::tls::get_tls_file;
 use pingora::protocols::tls::TlsRef;
 use pingora::tls::pkey::{PKey, Private};
 use pingora::tls::ssl::NameType;
@@ -25,14 +26,15 @@ impl DynamicCert {
         }
     }
 
-    fn get_stored_key_paths(&self, project: &str, app: &str) -> Result<(PathBuf, PathBuf)> {
-        let tls_options = TlsOptions {
-            project: project.to_string(),
-            app: Some(app.to_string()),
-        };
+    fn get_stored_key_paths(
+        &self,
+        app_id: &str,
+        deployment_id: &str,
+    ) -> Result<(PathBuf, PathBuf)> {
+        let options = AppEnvOptions::app(app_id, deployment_id);
 
-        let stored_cert = elevon_fs::agent::get_tls_file(TlsType::Cert, tls_options.clone())?;
-        let stored_key = elevon_fs::agent::get_tls_file(TlsType::Key, tls_options)?;
+        let stored_cert = get_tls_file(TlsType::Cert, options.clone())?;
+        let stored_key = get_tls_file(TlsType::Key, options)?;
 
         Ok((stored_cert, stored_key))
     }
@@ -73,13 +75,10 @@ impl DynamicCert {
     }
 
     pub fn setup_agent_certs(&self, domain: &str) -> Result<()> {
-        let tls_options = TlsOptions {
-            project: "agent".to_string(),
-            app: None,
-        };
+        let options = AppEnvOptions::agent();
 
-        let stored_cert = elevon_fs::agent::get_tls_file(TlsType::Cert, tls_options.clone())?;
-        let stored_key = elevon_fs::agent::get_tls_file(TlsType::Key, tls_options)?;
+        let stored_cert = get_tls_file(TlsType::Cert, options.clone())?;
+        let stored_key = get_tls_file(TlsType::Key, options)?;
 
         self.add_cert_from_paths(
             domain.to_string(),

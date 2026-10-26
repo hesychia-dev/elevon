@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use elevon_config::{ConfigError, ResolveEnvCredentials, resolve_env_or_literal};
+use elevon_contracts::deploy::RegistryVars;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -13,11 +14,13 @@ pub struct RegistryConfig {
 
 impl RegistryConfig {
     pub fn vars(&self) -> HashMap<String, String> {
-        HashMap::from([
-            ("REGISTRY_SERVER".to_string(), self.server.clone()),
-            ("REGISTRY_USERNAME".to_string(), self.username.clone()),
-            ("REGISTRY_PASSWORD".to_string(), self.password.clone()),
-        ])
+        let registry_vars = RegistryVars {
+            server: self.server.to_string(),
+            username: self.username.to_string(),
+            password: self.password.to_string(),
+        };
+
+        registry_vars.resolve_env_vars()
     }
 
     fn default_server() -> String {

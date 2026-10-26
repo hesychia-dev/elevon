@@ -4,11 +4,11 @@ pub mod routes;
 pub mod state;
 pub mod stream;
 
-use std::os::unix::fs::PermissionsExt;
 use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
 use axum::Router;
+use elevon_fs::agent::AgentPath;
 use tokio::task::JoinSet;
 
 use crate::api::middleware::UdsConnectInfo;
@@ -29,15 +29,13 @@ pub async fn run_api_server(args: ApiArgs, env: &ElevonEnv) -> Result<()> {
         .await
         .context(format!("failed to bind API listener to {}", addr))?;
 
-    let unix = tokio::net::UnixListener::bind(&state.api_socket.path).context(format!(
+    let socket_path = AgentPath::AgentSocket.resolve_and_delete_if_exists();
+    let unix = tokio::net::UnixListener::bind(&socket_path).context(format!(
         "failed to bind API listener to UNIX Socket {}",
-        state.api_socket.path.display(),
+        socket_path.display(),
     ))?;
 
-    std::fs::set_permissions(
-        &state.api_socket.path,
-        std::fs::Permissions::from_mode(0o660),
-    )?;
+    AgentPath::restrict_permissions(socket_path)?;
 
     tracing::info!("listening on {}", tcp.local_addr()?);
 

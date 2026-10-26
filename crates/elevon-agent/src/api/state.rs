@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use bollard::plugin::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum};
 use elevon_contracts::deploy::{StaticApp, StreamEvent, WebApp};
+use elevon_fs::agent::AgentPath;
 use tokio::sync::RwLock;
 
 use crate::api::db::AgentDb;
@@ -12,7 +13,7 @@ use crate::api::db::models::{Deployment, DeploymentStatus};
 use crate::api::stream::{ActionLogger, OptionLoggerExt};
 use crate::env::ElevonEnv;
 use crate::proxy::types::DeployAppData;
-use crate::socket::{Socket, SocketType};
+use crate::socket::Socket;
 
 pub type SharedApiState = Arc<ApiState>;
 
@@ -21,7 +22,6 @@ pub struct ApiState {
     pub docker: bollard::Docker,
     pub env: RwLock<ElevonEnv>,
     pub proxy_socket: Arc<Socket>,
-    pub api_socket: Arc<Socket>,
 }
 
 impl ApiState {
@@ -30,15 +30,17 @@ impl ApiState {
         let docker = bollard::Docker::connect_with_defaults()?;
         let env = RwLock::new(env.clone());
 
-        let proxy_socket = Arc::new(Socket::new(SocketType::Proxy, true)?);
-        let api_socket = Arc::new(Socket::new(SocketType::Api, true)?);
+        let proxy_socket_path = AgentPath::ProxySocket.ensure_parent_dir()?;
+
+        AgentPath::create_and_restrict_permissions(&proxy_socket_path, true)?;
+
+        let proxy_socket = Arc::new(Socket::new(true)?);
 
         let state = Self {
             db,
             docker,
             env,
             proxy_socket,
-            api_socket,
         };
 
         state.check_running_containers().await?;
