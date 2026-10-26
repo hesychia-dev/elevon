@@ -4,7 +4,7 @@ use std::{
     sync::LazyLock,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bollard::{
     auth::DockerCredentials,
     plugin::{ContainerCreateBody, HostConfig, PortBinding, PortMap, RestartPolicy},
@@ -18,8 +18,9 @@ use elevon_contracts::deploy::{
     AppRuntimeOptions, RegistryVars, StaticApp, StreamEvent, StreamLogLevel, TlsType, WebApp,
 };
 use elevon_fs::agent::{
-    AppEnvOptions,
+    AgentPath, AppEnvOptions,
     env::{add_app_env_vars, load_app_env},
+    remove_app_files,
     tls::write_tls_file,
 };
 use futures_util::TryStreamExt;
@@ -301,9 +302,9 @@ async fn pull_image_and_run_container(
         handle_static_app_deployment(
             &state.docker,
             &options.app_config.image_ref,
-            &options.app_config.project,
             &options.app_config.name,
-            &deployment.id.to_string(),
+            deployment.app_id.to_string(),
+            deployment.id.to_string(),
             static_app,
         )
         .await?;
@@ -503,30 +504,25 @@ async fn prune_old_releases(
     let deployments =
         Deployment::list_by_app_id(db, &app.id, 0, app.keep_releases as usize).await?;
 
-    for old in deployments {
-        if old.status == DeploymentStatus::Active || Some(old.id) == just_drained_id {
+    for old_dep in deployments {
+        if old_dep.status == DeploymentStatus::Active || Some(old_dep.id) == just_drained_id {
             continue; // never prune the one currently serving
         }
 
-        if let Some(container_id) = &old.container_id {
+        if let Some(container_id) = &old_dep.container_id {
             // best-effort, DrainJanitor may have already reaped it
             let _ = docker.remove_container(container_id, None).await;
         }
 
-        // let env_options = AppEnvOptions::app(&app.project, &app.name, &old.id.to_string());
+        let app_env_options = AppEnvOptions::app(app.id.to_string(), old_dep.id.to_string());
+        remove_app_files(app_env_options).context("Failed to remove app files")?;
 
-        // let _ = std::fs::remove_file(elevon_fs::agent::get_app_env(env_options)?);
-        // let _ = std::fs::remove_dir_all(
-        //     AgentPath::AppStaticDir(app.project.clone(), app.name.clone(), old.id.to_string())
-        //         .resolve(),
-        // );
-
-        if let Some(image_ref) = &old.image_ref {
+        if let Some(image_ref) = &old_dep.image_ref {
             let still_referenced = Deployment::filter(
                 Deployment::fields()
                     .image_ref()
                     .eq(image_ref)
-                    .and(Deployment::fields().id().ne(old.id)),
+                    .and(Deployment::fields().id().ne(old_dep.id)),
             )
             .first()
             .exec(db)
@@ -544,7 +540,7 @@ async fn prune_old_releases(
             }
         }
 
-        Deployment::delete_by_id(db, old.id).await?;
+        Deployment::delete_by_id(db, old_dep.id).await?;
     }
 
     Ok(())
@@ -553,17 +549,12 @@ async fn prune_old_releases(
 async fn handle_static_app_deployment(
     docker: &bollard::Docker,
     image_reference: &str,
-    project: &str,
     app_name: &str,
-    deployment_id: &str,
+    app_id: String,
+    deployment_id: String,
     static_app: &StaticApp,
 ) -> Result<()> {
-    // let out_dir = AgentPath::AppStaticDir(
-    //     project.to_string(),
-    //     app_name.to_string(),
-    //     deployment_id.to_string(),
-    // )
-    // .ensure_parent_dir()?;
+    let out_dir = AgentPath::AppStaticDir(app_id, deployment_id.clone()).ensure_parent_dir()?;
 
     let tmp_name = format!("{}-{}-tmp", app_name, deployment_id);
 
@@ -593,7 +584,7 @@ async fn handle_static_app_deployment(
     let cursor = Cursor::new(tar_bytes);
     let mut archive = Archive::new(cursor);
 
-    // archive.unpack(out_dir).expect("Failed to untar files");
+    archive.unpack(out_dir).expect("Failed to untar files");
 
     let remove_options = RemoveContainerOptions {
         force: true, // Forces removal even if it's somehow stuck running
