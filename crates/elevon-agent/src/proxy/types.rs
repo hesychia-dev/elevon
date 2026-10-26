@@ -14,8 +14,8 @@ pub enum AgentEvent {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeployAppData {
-    pub id: String,
-    pub project: String,
+    pub app_id: String,
+    pub deployment_id: String,
     pub name: String,
     pub status: DeploymentStatus,
     pub container_id: Option<String>,

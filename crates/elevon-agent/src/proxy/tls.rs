@@ -57,8 +57,8 @@ impl DynamicCert {
         Ok(())
     }
 
-    pub fn add_cert(&self, project: &str, app: &str, domain: String) -> Result<()> {
-        let (stored_cert, stored_key) = self.get_stored_key_paths(project, app)?;
+    pub fn add_cert(&self, app_id: &str, deployment_id: &str, domain: String) -> Result<()> {
+        let (stored_cert, stored_key) = self.get_stored_key_paths(app_id, deployment_id)?;
 
         self.add_cert_from_paths(
             domain,

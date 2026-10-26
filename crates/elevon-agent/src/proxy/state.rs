@@ -145,7 +145,7 @@ impl ProxyState {
             let backends = next.entry(domain.clone()).or_default();
 
             self.dynamic_cert
-                .add_cert(&route.project, &route.name, domain.clone())
+                .add_cert(&route.app_id, &route.deployment_id, domain.clone())
                 .unwrap_or_else(|err| {
                     tracing::error!(
                         domain = %domain,
@@ -155,7 +155,10 @@ impl ProxyState {
                     )
                 });
 
-            if let Some(existing) = backends.iter_mut().find(|a| a.id == route.id) {
+            if let Some(existing) = backends
+                .iter_mut()
+                .find(|a| a.deployment_id == route.deployment_id)
+            {
                 *existing = route.clone();
             } else {
                 backends.push(route.clone());

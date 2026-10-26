@@ -180,8 +180,8 @@ async fn deploy_app(
     let new_deployment = pull_image_and_run_container(tx, &state, deployment, options).await?;
 
     let app_data = DeployAppData {
-        id: new_deployment.id.to_string(),
-        project: app_config.project.to_string(),
+        app_id: new_deployment.app_id.to_string(),
+        deployment_id: new_deployment.id.to_string(),
         name: app_config.name.to_string(),
         container_id: new_deployment.container_id,
         web_app: web_deployment.map(|w| WebApp::from(&w)),
@@ -205,7 +205,8 @@ async fn deploy_app(
         state
             .proxy_socket
             .send(AgentEvent::UpsertRoute(app_data.clone()))
-            .await?;
+            .await
+            .context("Failed to send upsert route request")?;
     }
 
     let deployment_to_drain = match deployment_to_drain {
