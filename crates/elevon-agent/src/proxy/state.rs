@@ -10,7 +10,6 @@ use std::{
 use anyhow::Result;
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use elevon_contracts::deploy::WebApp;
 use pingora::lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin};
 
 use crate::{
@@ -18,7 +17,7 @@ use crate::{
     env::ElevonEnv,
     proxy::{
         tls::DynamicCert,
-        types::{BackendRuntime, DeployAppData, RouteBackendRuntime},
+        types::{BackendRuntime, DeployAppData, DrainAppData, RouteBackendRuntime},
     },
     socket::{Socket, SocketType, UnixClient},
 };
@@ -119,7 +118,7 @@ impl ProxyState {
         };
 
         let Some(domain) = domain else {
-            tracing::warn!(app = %&route.name, "refusing application route on non web app");
+            tracing::warn!(deployment = %&route.deployment_id, "refusing application route on non web app");
             return;
         };
 
@@ -169,6 +168,7 @@ impl ProxyState {
 
         // Getting to this means that its a static app so we don't need to touch LB
         let Some(port) = port else {
+            tracing::info!("Routes changed, current state: {:?}", self.routes.load());
             return;
         };
 
@@ -195,73 +195,35 @@ impl ProxyState {
         tracing::info!("Routes changed, current state: {:?}", self.routes.load());
     }
 
-    fn rebuild_load_balancer(&self, domain: String) {
-        let routes = self.routes.load();
-
-        let addrs: Vec<String> = routes
-            .get(&domain)
-            .into_iter()
-            .flatten()
-            .filter_map(|route| {
-                let web_app = route.web_app.clone()?;
-
-                if route.status != DeploymentStatus::Active {
-                    return None;
-                }
-
-                Some(format!("127.0.0.1:{}", web_app.port))
-            })
-            .collect();
-
-        if addrs.is_empty() {
-            self.lbs.rcu(|current| {
-                let mut next = (**current).clone();
-                next.remove(&domain);
-                next
-            });
-            return;
-        }
-
-        let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(addrs)
-            .expect("active application routes must have valid addresses");
-
-        lb.set_health_check(TcpHealthCheck::new());
-        lb.parallel_health_check = true;
-
-        let lb = Arc::new(lb);
-
-        self.lbs.rcu(|current| {
-            let mut next = (**current).clone();
-            next.insert(domain.to_string(), lb.clone());
-            next
-        });
-    }
-
-    pub fn drain_app(&self, container_id: String, web_app: Option<WebApp>) {
+    pub fn drain_app(&self, app: DrainAppData) {
         let mut backend_runtime = BackendRuntime {
-            container_id: container_id.clone(),
+            deployment_id: app.deployment_id.clone(),
+            container_id: app.container_id.clone(),
             status: DeploymentStatus::Drained,
             ..Default::default()
         };
 
-        if let Some(web_app) = web_app {
+        if let Some(domain) = app.domain {
             self.routes.rcu(|current| {
                 let mut next = current.as_ref().clone();
-                let backends = next.entry(web_app.domain.clone()).or_default();
+                let backends = next.entry(domain.clone()).or_default();
 
                 for backend in backends.iter_mut() {
-                    if backend.container_id.as_deref() == Some(&container_id) {
+                    if backend.deployment_id == app.deployment_id.clone() {
                         backend.status = DeploymentStatus::Drained;
                     }
                 }
 
                 next
             });
-            self.rebuild_load_balancer(web_app.domain);
 
+            self.rebuild_load_balancer(domain);
+        }
+
+        if let Some(port) = app.port {
             let inflight = self
                 .runtime
-                .get(&container_id)
+                .get(&app.deployment_id)
                 .map(|r| {
                     r.route
                         .as_ref()
@@ -271,7 +233,7 @@ impl ProxyState {
                 .unwrap_or(0);
 
             let route_backend_runtime = RouteBackendRuntime {
-                port: web_app.port,
+                port: port,
                 inflight: AtomicUsize::new(inflight),
                 drain_started_at: Some(Instant::now()),
             };
@@ -280,9 +242,9 @@ impl ProxyState {
         }
 
         self.runtime
-            .insert(container_id.clone(), Arc::new(backend_runtime));
+            .insert(app.deployment_id.clone(), Arc::new(backend_runtime));
 
-        tracing::info!(%container_id, "route marked as draining");
+        tracing::info!(deployment = %&app.deployment_id, "app marked as draining");
     }
 
     pub fn get_backend_by_port(&self, port: u16) -> Option<Arc<BackendRuntime>> {
@@ -292,10 +254,10 @@ impl ProxyState {
             .map(|r| r.value().clone())
     }
 
-    pub fn increase_inflight_count(&self, container_id: &str) {
+    pub fn increase_inflight_count(&self, deployment_id: &str) {
         if let Some(route) = self
             .runtime
-            .get(container_id)
+            .get(deployment_id)
             .as_ref()
             .and_then(|r| r.route.as_ref())
         {
@@ -303,10 +265,10 @@ impl ProxyState {
         }
     }
 
-    pub fn decrease_inflight_count(&self, container_id: &str) {
+    pub fn decrease_inflight_count(&self, deployment_id: &str) {
         if let Some(route) = self
             .runtime
-            .get(container_id)
+            .get(deployment_id)
             .as_ref()
             .and_then(|r| r.route.as_ref())
         {
@@ -324,7 +286,7 @@ impl ProxyState {
                 }
 
                 let Some(route) = runtime.route.as_ref() else {
-                    return Some(r.key().clone());
+                    return runtime.container_id.clone();
                 };
 
                 let inflight = route.inflight.load(std::sync::atomic::Ordering::Relaxed);
@@ -333,7 +295,7 @@ impl ProxyState {
                     .is_some_and(|t| t.elapsed() >= grace_period);
 
                 if inflight == 0 || past_grace {
-                    Some(r.key().clone())
+                    runtime.container_id.clone()
                 } else {
                     None
                 }
@@ -393,5 +355,47 @@ impl ProxyState {
         })?;
 
         Some(true)
+    }
+
+    fn rebuild_load_balancer(&self, domain: String) {
+        let routes = self.routes.load();
+
+        let addrs: Vec<String> = routes
+            .get(&domain)
+            .into_iter()
+            .flatten()
+            .filter_map(|route| {
+                let web_app = route.web_app.clone()?;
+
+                if route.status != DeploymentStatus::Active {
+                    return None;
+                }
+
+                Some(format!("127.0.0.1:{}", web_app.port))
+            })
+            .collect();
+
+        if addrs.is_empty() {
+            self.lbs.rcu(|current| {
+                let mut next = (**current).clone();
+                next.remove(&domain);
+                next
+            });
+            return;
+        }
+
+        let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(addrs)
+            .expect("active application routes must have valid addresses");
+
+        lb.set_health_check(TcpHealthCheck::new());
+        lb.parallel_health_check = true;
+
+        let lb = Arc::new(lb);
+
+        self.lbs.rcu(|current| {
+            let mut next = (**current).clone();
+            next.insert(domain.to_string(), lb.clone());
+            next
+        });
     }
 }

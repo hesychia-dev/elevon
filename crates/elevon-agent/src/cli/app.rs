@@ -2,7 +2,7 @@ use anyhow::Result;
 use elevon_contracts::{
     cli::app::{AppCommands, DeploymentCommands},
     cli_verify_action_with_items,
-    deploy::{AppStopPayload, WebApp, log_stream_events},
+    deploy::{AppStopPayload, log_stream_events},
 };
 
 use crate::{
@@ -13,6 +13,7 @@ use crate::{
     },
     cli::CliCommand,
     image::drain_app,
+    proxy::types::DrainAppData,
     socket::UnixClient,
 };
 
@@ -118,39 +119,26 @@ pub async fn handle_app_stop(
             continue;
         }
 
-        let Some(container_id) = active_deployment.container_id.clone() else {
-            logger
-                .log(format!("App '{}' doesn't have valid container id", app.name).into())
-                .await?;
-            continue;
+        let app_data = DrainAppData {
+            deployment_id: active_deployment.id.to_string(),
+            container_id: active_deployment.container_id.clone(),
+            domain: active_deployment.domain.clone(),
+            port: active_deployment.web.as_ref().map(|w| w.port),
         };
 
-        let web_app = active_deployment.web.as_ref().map(WebApp::from);
+        let is_web_app = active_deployment.web.is_some();
 
-        drain_app(
-            &state,
-            &mut db,
-            active_deployment,
-            container_id,
-            web_app.clone(),
-        )
-        .await?;
+        drain_app(&state, &mut db, active_deployment, app_data).await?;
 
-        if web_app.is_some() {
-            logger
-                .log(
-                    format!(
-                        "App '{}' was marked to be drained and will be stopped soon",
-                        app.name
-                    )
-                    .into(),
-                )
-                .await?;
-        } else {
-            logger
-                .log(format!("App '{}' was stopped", app.name).into())
-                .await?;
-        }
+        let log_msg = match is_web_app {
+            true => format!(
+                "App '{}' was marked to be drained and will be stopped soon",
+                app.name
+            ),
+            false => format!("App '{}' was stopped", app.name),
+        };
+
+        logger.log(log_msg.into()).await?;
     }
 
     Ok(())

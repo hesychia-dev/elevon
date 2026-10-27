@@ -17,8 +17,8 @@ async fn run_socket_listener(state: Arc<ProxyState>) -> Result<()> {
                 AgentEvent::UpsertRoute(route) => {
                     cloned_state.upsert_route(route);
                 }
-                AgentEvent::DrainApp(container_id, web_app) => {
-                    cloned_state.drain_app(container_id, web_app);
+                AgentEvent::DrainApp(route) => {
+                    cloned_state.drain_app(route);
                 }
             }
 

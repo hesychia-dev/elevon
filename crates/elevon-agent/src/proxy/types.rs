@@ -9,18 +9,25 @@ use crate::api::db::models::DeploymentStatus;
 #[serde(tag = "event", content = "data")]
 pub enum AgentEvent {
     UpsertRoute(DeployAppData),
-    DrainApp(String, Option<WebApp>),
+    DrainApp(DrainAppData),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeployAppData {
     pub app_id: String,
     pub deployment_id: String,
-    pub name: String,
     pub status: DeploymentStatus,
     pub container_id: Option<String>,
     pub web_app: Option<WebApp>,
     pub static_app: Option<StaticApp>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DrainAppData {
+    pub deployment_id: String,
+    pub container_id: Option<String>,
+    pub domain: Option<String>,
+    pub port: Option<u16>,
 }
 
 #[derive(Debug, Default)]
@@ -32,7 +39,8 @@ pub struct RouteBackendRuntime {
 
 #[derive(Debug, Default)]
 pub struct BackendRuntime {
-    pub container_id: String,
+    pub deployment_id: String,
+    pub container_id: Option<String>,
     pub status: DeploymentStatus,
     pub route: Option<RouteBackendRuntime>,
 }

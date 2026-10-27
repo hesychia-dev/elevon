@@ -15,7 +15,7 @@ use bollard::{
 };
 use elevon_contracts::deploy::{
     AppDeployPayload, AppHealthCheckConfig, AppPayload, AppRole, AppRollbackPayload,
-    AppRuntimeOptions, RegistryVars, StaticApp, StreamEvent, StreamLogLevel, TlsType, WebApp,
+    AppRuntimeOptions, RegistryVars, StaticApp, StreamEvent, StreamLogLevel, TlsType,
 };
 use elevon_fs::agent::{
     AgentPath, AppEnvOptions,
@@ -35,7 +35,7 @@ use crate::{
         state::SharedApiState,
         stream::{StreamSender, emit},
     },
-    proxy::types::{AgentEvent, DeployAppData},
+    proxy::types::{AgentEvent, DeployAppData, DrainAppData},
 };
 
 static ALLOCATED_PORTS: LazyLock<RwLock<HashSet<u16>>> =
@@ -79,8 +79,7 @@ pub async fn drain_app(
     state: &SharedApiState,
     db: &mut toasty::Db,
     mut deployment: Deployment,
-    container_id: String,
-    web_app: Option<WebApp>,
+    app_data: DrainAppData,
 ) -> Result<()> {
     toasty::update!(deployment {
         status: DeploymentStatus::Drained
@@ -90,7 +89,7 @@ pub async fn drain_app(
 
     state
         .proxy_socket
-        .send(AgentEvent::DrainApp(container_id, web_app))
+        .send(AgentEvent::DrainApp(app_data))
         .await?;
 
     Ok(())
@@ -168,25 +167,24 @@ async fn deploy_app(
         None => Deployment::create_deployment(&mut db_tx, &db_app, &app_config, new_port).await?,
     };
 
-    let web_deployment = deployment.web.clone();
-    let static_web_deployment = deployment.static_web.clone();
-
     let options = PullImageAndRunContainerOptions {
         db_tx: &mut db_tx,
         new_port,
         app_config: &app_config,
     };
 
+    let web_app = deployment.get_web_app();
+    let static_app = deployment.get_static_app();
+
     let new_deployment = pull_image_and_run_container(tx, &state, deployment, options).await?;
 
     let app_data = DeployAppData {
         app_id: new_deployment.app_id.to_string(),
         deployment_id: new_deployment.id.to_string(),
-        name: app_config.name.to_string(),
         container_id: new_deployment.container_id,
-        web_app: web_deployment.map(|w| WebApp::from(&w)),
-        static_app: static_web_deployment.map(|s| StaticApp::from(&s)),
         status: DeploymentStatus::Active,
+        web_app,
+        static_app,
     };
 
     if AppRole::Web == app_config.role {
@@ -220,26 +218,24 @@ async fn deploy_app(
 
     // Marks the current deployment as draining, so no new requests will be handled by it,
     // and later the DrainJanitor service will terminate the container.
-    if let Some(deployment_to_drain) = deployment_to_drain
-        && let Some(container_id) = deployment_to_drain.container_id.clone()
-    {
+    if let Some(deployment_to_drain) = deployment_to_drain {
         emit(
             tx,
             StreamEvent::log(format!(
-                "[{}] Found previously released container, draining it...",
+                "[{}] Found previously released deployment, draining it...",
                 app_config.name,
             )),
         )
         .await;
 
-        drain_app(
-            &state,
-            &mut db,
-            deployment_to_drain,
-            container_id,
-            app_data.web_app,
-        )
-        .await?;
+        let drain_data = DrainAppData {
+            deployment_id: deployment_to_drain.id.to_string(),
+            container_id: deployment_to_drain.container_id.clone(),
+            domain: deployment_to_drain.domain.clone(),
+            port: deployment_to_drain.web.as_ref().map(|w| w.port),
+        };
+
+        drain_app(&state, &mut db, deployment_to_drain, drain_data).await?;
     }
 
     if !is_rollback
@@ -714,10 +710,8 @@ async fn rollback_deployment(
         image_ref: image_ref.to_string(),
         keep_releases: app.keep_releases,
         runtime_options: runtime_options.clone(),
-        web_app: target_deployment.web.as_ref().map(|web| WebApp {
-            port: web.port,
-            domain: web.domain.clone(),
-        }),
+        web_app: target_deployment.get_web_app(),
+        static_app: target_deployment.get_static_app(),
         healthcheck: AppHealthCheckConfig::from(&deployment_options.healthcheck),
         ..Default::default()
     };

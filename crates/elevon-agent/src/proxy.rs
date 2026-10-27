@@ -29,7 +29,7 @@ use crate::{
 };
 
 pub struct RequestCtx {
-    pub container_id: Option<String>,
+    pub deployment_id: Option<String>,
 }
 
 pub struct Proxy {
@@ -40,7 +40,9 @@ pub struct Proxy {
 impl ProxyHttp for Proxy {
     type CTX = RequestCtx;
     fn new_ctx(&self) -> Self::CTX {
-        RequestCtx { container_id: None }
+        RequestCtx {
+            deployment_id: None,
+        }
     }
 
     async fn upstream_peer(
@@ -85,7 +87,7 @@ impl ProxyHttp for Proxy {
         if let Some(port) = selected_port {
             let selected = self.state.get_backend_by_port(port);
             if let Some(backend) = selected {
-                ctx.container_id = Some((*backend.container_id).to_string());
+                ctx.deployment_id = Some((*backend.deployment_id).to_string());
             }
         }
 
@@ -98,8 +100,8 @@ impl ProxyHttp for Proxy {
             session.req_header().uri.path(),
         );
 
-        if let Some(container_id) = ctx.container_id.clone() {
-            self.state.increase_inflight_count(&container_id);
+        if let Some(deployment_id) = ctx.deployment_id.clone() {
+            self.state.increase_inflight_count(&deployment_id);
         }
 
         Ok(false)
@@ -111,8 +113,8 @@ impl ProxyHttp for Proxy {
         _upstream_response: &mut ResponseHeader,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
-        if let Some(container_id) = ctx.container_id.clone() {
-            self.state.decrease_inflight_count(&container_id);
+        if let Some(deployment_id) = ctx.deployment_id.clone() {
+            self.state.decrease_inflight_count(&deployment_id);
         }
 
         Ok(())
