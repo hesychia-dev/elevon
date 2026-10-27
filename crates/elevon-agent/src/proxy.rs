@@ -95,10 +95,8 @@ impl ProxyHttp for Proxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        self.state.handle_static_app_request(
-            session.req_header().uri.host(),
-            session.req_header().uri.path(),
-        );
+        let static_app = self.state.handle_static_app_request(session);
+        println!("request_filter-static_app: {:?}", static_app);
 
         if let Some(deployment_id) = ctx.deployment_id.clone() {
             self.state.increase_inflight_count(&deployment_id);

@@ -10,7 +10,10 @@ use std::{
 use anyhow::Result;
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use pingora::lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin};
+use pingora::{
+    lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin},
+    proxy::Session,
+};
 
 use crate::{
     api::db::models::DeploymentStatus,
@@ -341,18 +344,27 @@ impl ProxyState {
         }
     }
 
-    pub fn handle_static_app_request(&self, host: Option<&str>, path: &str) -> Option<bool> {
-        let host = host?;
+    pub fn handle_static_app_request(&self, session: &mut Session) -> Option<bool> {
+        let host = session.req_header().headers.get("Host");
+        let path = session.req_header().uri.path();
 
-        let guard = self.routes.load();
-        let routes = guard.get(host)?;
+        println!("host: {:?}", host);
 
-        let _static_app = routes.iter().find_map(|route| {
-            route
-                .static_app
-                .as_ref()
-                .filter(|app| app.path.as_deref().is_none_or(|p| path.starts_with(p)))
-        })?;
+        // let host = host?;
+
+        // let guard = self.routes.load();
+        // let routes = guard.get(host.)?;
+
+        // println!("routes: {:?}", routes);
+
+        // let static_app = routes.iter().find_map(|route| {
+        //     route
+        //         .static_app
+        //         .as_ref()
+        //         .filter(|app| app.path.as_deref().is_none_or(|p| path.starts_with(p)))
+        // });
+
+        // println!("static_app: {:?}", static_app);
 
         Some(true)
     }
