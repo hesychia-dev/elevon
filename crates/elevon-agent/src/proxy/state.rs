@@ -244,7 +244,7 @@ impl ProxyState {
         self.runtime
             .insert(app.deployment_id.clone(), Arc::new(backend_runtime));
 
-        tracing::info!(deployment = %&app.deployment_id, "app marked as draining");
+        tracing::info!(deployment = %&app.deployment_id, "App marked as draining");
     }
 
     pub fn get_backend_by_port(&self, port: u16) -> Option<Arc<BackendRuntime>> {
