@@ -2,7 +2,9 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
-use elevon_contracts::deploy::{AppHealthCheckConfig, AppRuntimeOptions, WebApp};
+use elevon_contracts::deploy::{
+    AppHealthCheckConfig, AppPayload, AppRuntimeOptions, StaticApp, WebApp,
+};
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 use tabled::Tabled;
@@ -26,6 +28,8 @@ pub struct Deployment {
 
     pub web: Option<DeploymentWeb>,
 
+    pub static_web: Option<DeploymentStaticWeb>,
+
     #[default(DeploymentStatus::Pending)]
     pub status: DeploymentStatus,
 
@@ -43,24 +47,41 @@ pub struct Deployment {
 }
 
 impl Deployment {
-    // It would be better this to be also checking the containers status just to make sure its running or not
-    async fn _get_by_app_id(
-        db: &mut toasty::Db,
-        app_id: &uuid::Uuid,
-        status: DeploymentStatus,
-    ) -> Result<Option<Self>> {
-        let deployment = Deployment::filter(
-            Deployment::fields()
-                .app_id()
-                .eq(app_id)
-                .and(Deployment::fields().status().eq(status)),
-        )
-        .include(Deployment::fields().app())
-        .include(Deployment::fields().options())
-        .latest_by(Deployment::fields().updated_at())
-        .first()
-        .exec(db)
-        .await?;
+    pub async fn create_deployment<'a>(
+        db: &mut toasty::Transaction<'a>,
+        app: &'a App,
+        payload: &'a AppPayload,
+        port: Option<u16>,
+    ) -> Result<Self> {
+        let web = match (&payload.web_app, port) {
+            (Some(web_app), Some(new_port)) => Some(DeploymentWeb {
+                domain: web_app.domain.clone(),
+                port: new_port,
+            }),
+            _ => None,
+        };
+
+        let static_web = payload.static_app.as_ref().map(|s| DeploymentStaticWeb {
+            domain: s.domain.clone(),
+            directory: s.directory.clone(),
+            index: s.index.clone(),
+            path: s.path.clone(),
+        });
+
+        let deployment = Deployment::create()
+            .app_id(app.id)
+            .web(web)
+            .static_web(static_web)
+            .exec(db)
+            .await?;
+
+        let runtime_options = DeploymentRuntimeOptions::from(&payload.runtime_options);
+
+        DeploymentOption::create()
+            .deployment_id(deployment.id)
+            .runtime(runtime_options)
+            .exec(db)
+            .await?;
 
         Ok(deployment)
     }
@@ -94,6 +115,28 @@ impl Deployment {
             .exec(db)
             .await?)
     }
+
+    // It would be better this to be also checking the containers status just to make sure its running or not
+    async fn _get_by_app_id(
+        db: &mut toasty::Db,
+        app_id: &uuid::Uuid,
+        status: DeploymentStatus,
+    ) -> Result<Option<Self>> {
+        let deployment = Deployment::filter(
+            Deployment::fields()
+                .app_id()
+                .eq(app_id)
+                .and(Deployment::fields().status().eq(status)),
+        )
+        .include(Deployment::fields().app())
+        .include(Deployment::fields().options())
+        .latest_by(Deployment::fields().updated_at())
+        .first()
+        .exec(db)
+        .await?;
+
+        Ok(deployment)
+    }
 }
 
 #[derive(
@@ -119,6 +162,25 @@ impl From<&DeploymentWeb> for WebApp {
         Self {
             domain: value.domain.clone(),
             port: value.port,
+        }
+    }
+}
+
+#[derive(Debug, Clone, toasty::Embed)]
+pub struct DeploymentStaticWeb {
+    pub domain: String,
+    pub directory: String,
+    pub index: String,
+    pub path: Option<String>,
+}
+
+impl From<&DeploymentStaticWeb> for StaticApp {
+    fn from(value: &DeploymentStaticWeb) -> Self {
+        Self {
+            domain: value.domain.clone(),
+            directory: value.directory.clone(),
+            index: value.index.clone(),
+            path: value.path.clone(),
         }
     }
 }
@@ -227,6 +289,7 @@ impl From<&DeploymentRuntimeOptions> for AppRuntimeOptions {
 
 #[derive(Debug, toasty::Embed)]
 pub struct DeploymentHealthCheck {
+    pub start_period: u64,
     pub interval: u64,
     pub timeout: u64,
     pub retries: u64,
@@ -245,6 +308,7 @@ impl Default for DeploymentHealthCheck {
 impl From<&AppHealthCheckConfig> for DeploymentHealthCheck {
     fn from(value: &AppHealthCheckConfig) -> Self {
         Self {
+            start_period: value.start_period,
             interval: value.interval,
             timeout: value.timeout,
             retries: value.retries,
@@ -258,6 +322,7 @@ impl From<&AppHealthCheckConfig> for DeploymentHealthCheck {
 impl From<&DeploymentHealthCheck> for AppHealthCheckConfig {
     fn from(value: &DeploymentHealthCheck) -> Self {
         Self {
+            start_period: value.start_period,
             interval: value.interval,
             timeout: value.timeout,
             retries: value.retries,

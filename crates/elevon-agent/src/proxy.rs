@@ -92,7 +92,12 @@ impl ProxyHttp for Proxy {
         Ok(Box::new(HttpPeer::new(upstream, false, String::new())))
     }
 
-    async fn request_filter(&self, _session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+    async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        self.state.handle_static_app_request(
+            session.req_header().uri.host(),
+            session.req_header().uri.path(),
+        );
+
         if let Some(container_id) = ctx.container_id.clone() {
             self.state.increase_inflight_count(&container_id);
         }
@@ -164,6 +169,7 @@ impl BackgroundService for DrainJanitor {
                             .await
                         {
                             tracing::warn!(%container_id, %err, "failed to stop container");
+                            // TODO: If it fails just delete from the db
                             continue;
                         }
 

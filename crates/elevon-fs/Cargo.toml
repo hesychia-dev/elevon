@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["agent"]
-agent = []
+agent = ["dep:dotenvy"]
 
 [dependencies]
 flate2 = "1.1.10"
@@ -13,7 +12,8 @@ tar.workspace = true
 tempfile = "3.27.0"
 
 anyhow.workspace = true
-dotenvy.workspace = true
+arc-swap.workspace = true
+dotenvy = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true
 tracing.workspace = true

@@ -20,6 +20,7 @@ elevon-http = { path = "./crates/elevon-http" }
 
 async-trait = "0.1.92"
 anyhow = "1"
+arc-swap = "1.9.2"
 axum = "0.8.9"
 bollard = "0.21.1"
 bytes = "1.12.1"

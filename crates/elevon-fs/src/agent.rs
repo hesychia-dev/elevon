@@ -104,6 +104,18 @@ pub fn add_app_env(key: String, value: String, options: AppEnvOptions) -> Result
     Ok(())
 }
 
+pub fn get_app_static_file(
+    app_name: &str,
+    deployment_id: &str,
+    file_path: &str,
+) -> Option<PathBuf> {
+    let dir = AgentPath::AppStaticDir(app_name.to_string(), deployment_id.to_string())
+        .ensure_parent_dir()
+        .ok()?;
+    let path = dir.join(file_path);
+    path.is_file().then_some(path)
+}
+
 #[derive(Clone)]
 pub struct TlsOptions {
     pub project: String,
@@ -241,6 +253,7 @@ pub enum AgentPath {
     SystemdDir,
     Database,
     AppEnv(String, Option<String>, Option<String>),
+    AppStaticDir(String, String),
     ProjectTlsDir(String),
     ProxySocket,
     ApiSocket,
@@ -287,6 +300,11 @@ impl AgentPath {
 
                 path.set_extension("env");
                 path
+            }
+
+            AgentPath::AppStaticDir(app, deployment_id) => {
+                let dir = AgentPath::UploadsDir.resolve();
+                dir.join(app).join(deployment_id)
             }
 
             AgentPath::ProjectTlsDir(project) => {
