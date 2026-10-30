@@ -67,7 +67,7 @@ pub fn add_app_env(key: String, value: String, options: AppEnvOptions) -> Result
     let mut env = load_app_env(options.clone()).map_err(|e| {
         anyhow::anyhow!(
             "failed to resolve env file path while loading env trying to update env, {}",
-            e.to_string()
+            e
         )
     })?;
 

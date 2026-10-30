@@ -101,8 +101,8 @@ pub async fn handle_app_stop(
     for app in payload.apps {
         let app = App::get_by_name_or_id(&mut db, &app, payload.project.clone()).await?;
 
-        let active_deployment = Deployment::get_latest_deployment(&mut db, &app.id).await?;
-        let Some(active_deployment) = active_deployment else {
+        let mut active_deployment = Deployment::get_latest_deployment(&mut db, &app.id).await?;
+        let Some(active_deployment) = active_deployment.as_mut() else {
             logger
                 .log(format!("App '{}' is not running, skipping", app.name).into())
                 .await?;

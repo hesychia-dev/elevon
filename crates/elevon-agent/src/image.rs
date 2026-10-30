@@ -78,14 +78,14 @@ pub async fn deploy_apps(
 pub async fn drain_app(
     state: &SharedApiState,
     db: &mut toasty::Db,
-    mut deployment: Deployment,
+    deployment: &mut Deployment,
     app_data: DrainAppData,
 ) -> Result<()> {
-    toasty::update!(deployment {
-        status: DeploymentStatus::Drained
-    })
-    .exec(db)
-    .await?;
+    deployment
+        .update()
+        .status(DeploymentStatus::Drained)
+        .exec(db)
+        .await?;
 
     state
         .proxy_socket
@@ -206,20 +206,17 @@ async fn deploy_app(
                 .proxy_socket
                 .send(AgentEvent::UpsertRoute(app_data.clone()))
                 .await
-                .map_err(|err| {
-                    anyhow::anyhow!("Failed to send upsert route request: {}", err.to_string())
-                })?;
+                .map_err(|err| anyhow::anyhow!("Failed to send upsert route request: {}", err))?;
         }
 
-        let deployment_to_drain = match deployment_to_drain {
+        let mut deployment_to_drain = match deployment_to_drain {
             Some(v) => Some(v),
             None => Deployment::get_latest_deployment(&mut db, &db_app.id).await?,
         };
-        let deployment_to_drain_id = deployment_to_drain.as_ref().map(|d| d.id);
 
         // Marks the current deployment as draining, so no new requests will be handled by it,
         // and later the DrainJanitor service will terminate the container.
-        if let Some(deployment_to_drain) = deployment_to_drain {
+        if let Some(deployment_to_drain) = deployment_to_drain.as_mut() {
             emit(
                 tx,
                 StreamEvent::log(format!(
@@ -241,7 +238,7 @@ async fn deploy_app(
 
         if !is_rollback
             && let Err(err) =
-                prune_old_releases(&state.docker, &mut db, &db_app, deployment_to_drain_id).await
+                prune_old_releases(&state.docker, &mut db, &db_app, deployment_to_drain).await
         {
             emit(
                 tx,
@@ -262,14 +259,11 @@ async fn deploy_app(
     }
     .await;
 
-    match result {
-        Err(err) => {
-            remove_app_files(app_env_options)
-                .context("Failed to remove app files after deployment failure")?;
+    if let Err(err) = result {
+        remove_app_files(app_env_options)
+            .context("Failed to remove app files after deployment failure")?;
 
-            bail!("Failed: {}", err.to_string());
-        }
-        _ => {}
+        bail!("Failed: {}", err);
     }
 
     Ok(())
@@ -343,14 +337,14 @@ async fn pull_image_and_run_container(
 
     let container_id = run_container(
         &state.docker,
-        &deployment,
+        deployment,
         options.app_config,
         app_env_vars,
         options.new_port,
     )
     .await;
 
-    let res = match container_id {
+    match container_id {
         Err(err) => {
             if let Some(port) = options.new_port {
                 clear_port(&port).await;
@@ -409,7 +403,7 @@ async fn pull_image_and_run_container(
         }
     }?;
 
-    Ok(res)
+    Ok(())
 }
 
 struct PullImageOptions<'a> {
@@ -521,14 +515,16 @@ async fn prune_old_releases(
     docker: &bollard::Docker,
     db: &mut toasty::Db,
     app: &App,
-    just_drained_id: Option<uuid::Uuid>,
+    drained_deployment: Option<Deployment>,
 ) -> Result<()> {
     let deployments =
         Deployment::list_by_app_id(db, &app.id, u16::MAX as usize, app.keep_releases as usize)
             .await?;
 
-    for old_dep in deployments {
-        if old_dep.status == DeploymentStatus::Active || Some(old_dep.id) == just_drained_id {
+    for mut old_dep in deployments {
+        if old_dep.status == DeploymentStatus::Active
+            || Some(&old_dep.id) == drained_deployment.as_ref().map(|d| &d.id)
+        {
             continue; // never prune the one currently serving
         }
 
@@ -563,7 +559,11 @@ async fn prune_old_releases(
             }
         }
 
-        Deployment::delete_by_id(db, old_dep.id).await?;
+        old_dep
+            .update()
+            .status(DeploymentStatus::Pruned)
+            .exec(db)
+            .await?;
     }
 
     Ok(())

@@ -177,6 +177,7 @@ pub enum DeploymentStatus {
     Active,
     Drained,
     Failed,
+    Pruned,
 }
 
 #[derive(Debug, Clone, toasty::Embed)]

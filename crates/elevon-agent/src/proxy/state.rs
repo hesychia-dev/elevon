@@ -7,13 +7,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
+use axum::http::HeaderValue;
+use bytes::Bytes;
 use dashmap::DashMap;
+use elevon_fs::agent::{AgentPath, get_static_app_file};
+use futures_util::StreamExt;
 use pingora::{
+    http::ResponseHeader,
     lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin},
     proxy::Session,
 };
+use tokio::fs::File;
+use tokio_util::io::ReaderStream;
 
 use crate::{
     api::db::models::DeploymentStatus,
@@ -236,7 +243,7 @@ impl ProxyState {
                 .unwrap_or(0);
 
             let route_backend_runtime = RouteBackendRuntime {
-                port: port,
+                port,
                 inflight: AtomicUsize::new(inflight),
                 drain_started_at: Some(Instant::now()),
             };
@@ -344,31 +351,6 @@ impl ProxyState {
         }
     }
 
-    pub fn handle_static_app_request(&self, session: &mut Session) -> Option<bool> {
-        let host = session.req_header().headers.get("Host");
-        let path = session.req_header().uri.path();
-
-        println!("host: {:?}", host);
-
-        // let host = host?;
-
-        // let guard = self.routes.load();
-        // let routes = guard.get(host.)?;
-
-        // println!("routes: {:?}", routes);
-
-        // let static_app = routes.iter().find_map(|route| {
-        //     route
-        //         .static_app
-        //         .as_ref()
-        //         .filter(|app| app.path.as_deref().is_none_or(|p| path.starts_with(p)))
-        // });
-
-        // println!("static_app: {:?}", static_app);
-
-        Some(true)
-    }
-
     fn rebuild_load_balancer(&self, domain: String) {
         let routes = self.routes.load();
 
@@ -409,5 +391,120 @@ impl ProxyState {
             next.insert(domain.to_string(), lb.clone());
             next
         });
+    }
+
+    /// Returning error means it's not a static app,
+    /// returning false means - it's a static app but the file not found
+    /// returning true means it's successful
+    pub async fn handle_static_app_request(&self, session: &mut Session) -> Result<bool> {
+        let host = session
+            .req_header()
+            .headers
+            .get("Host")
+            .context("Host not found in headers")?;
+        let path = session.req_header().uri.path();
+
+        let domain = extract_domain(host).context("Domain not found")?;
+
+        let guard = self.routes.load();
+        let routes = guard.get(domain).context("Route not found")?;
+
+        let (app_id, deployment_id, static_app) = routes
+            .iter()
+            .find_map(|route| {
+                route
+                    .static_app
+                    .as_ref()
+                    .filter(|app| app.path.as_deref().is_none_or(|p| path.starts_with(p)))
+                    .map(|s| (route.app_id.clone(), route.deployment_id.clone(), s))
+            })
+            .context("Static app not found")?;
+
+        let static_dir = AgentPath::AppStaticDir(app_id, deployment_id);
+
+        let Some(file_path) = get_static_app_file(&static_dir, path, &static_app.directory) else {
+            return Ok(false);
+        };
+
+        if file_response(session, file_path).await.is_err() {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+}
+
+fn extract_domain(host: &HeaderValue) -> Option<&str> {
+    let host_str = host.to_str().ok()?;
+
+    let mut parts = host_str.rsplitn(2, ':');
+    let first_part = parts.next()?;
+
+    if let Some(domain_part) = parts.next() {
+        // If there was a colon, the second part yielded by rsplitn is the domain
+        Some(domain_part)
+    } else {
+        // If there was no colon, the whole string is the domain
+        Some(first_part)
+    }
+}
+
+pub async fn not_found_response(session: &mut Session) -> Result<()> {
+    let mut header = ResponseHeader::build(404, Some(3))?;
+    header.insert_header("Content-Type", "text/plain")?;
+
+    session
+        .write_response_header(Box::new(header), false)
+        .await?;
+    session
+        .write_response_body(Some(Bytes::from("404 Not Found")), true)
+        .await?;
+
+    Ok(())
+}
+
+async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> Result<()> {
+    println!("file_path: {:?}", file_path);
+    let file = File::open(&file_path).await?;
+
+    let mut header = ResponseHeader::build(200, None)?;
+    let mime_guess = mime_guess::from_path(&file_path)
+        .first_raw()
+        .unwrap_or("application/octet-stream");
+
+    header.insert_header("Content-Type", mime_guess)?;
+
+    session
+        .write_response_header(Box::new(header), false)
+        .await?;
+
+    let mut file_stream = ReaderStream::new(file);
+    while let Some(chunk) = file_stream.next().await {
+        let chunk = chunk?;
+        session.write_response_body(Some(chunk), false).await?;
+    }
+
+    session.write_response_body(None, true).await?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_domain() -> Result<()> {
+        assert_eq!(
+            extract_domain(&HeaderValue::from_static("test.com:8000")),
+            Some("test.com")
+        );
+
+        assert_eq!(
+            extract_domain(&HeaderValue::from_static("test.com")),
+            Some("test.com")
+        );
+
+        Ok(())
     }
 }
