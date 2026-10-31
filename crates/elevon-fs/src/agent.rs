@@ -57,7 +57,7 @@ pub enum AgentPath {
 
     /// `AgentPath::StateDir/{app_id}`
     ///
-    /// `{app_id}` - Either `agent` or `{app.id}`
+    /// `{app_id}` - Either `agent` or `apps/{app.id}`
     UploadsDir(String),
 
     /// `/run/elevon-agent`
@@ -141,8 +141,9 @@ impl AgentPath {
             AgentPath::AgentTlsKey => AgentPath::AgentDir.resolve().join("tls").join("key.pem"),
 
             AgentPath::AppDeploymentDir(app_id, deploment_id) => {
-                AgentPath::UploadsDir(app_id.clone())
+                AgentPath::UploadsDir("apps".to_string())
                     .resolve()
+                    .join(app_id)
                     .join(deploment_id)
             }
 
@@ -407,5 +408,21 @@ pub fn remove_files(
     }
 
     println!("Elevon uninstalled.");
+    Ok(())
+}
+
+pub fn remove_app_files(options: AppEnvOptions) -> Result<()> {
+    if !matches!(options.app_type, AppType::App) {
+        bail!("This is not an app to remove");
+    }
+
+    let Some(deployment_id) = options.deployment_id else {
+        bail!("No deployment ID was specified");
+    };
+
+    let dir = AgentPath::AppDeploymentDir(options.app_id, deployment_id).resolve();
+
+    let _ = std::fs::remove_dir_all(dir);
+
     Ok(())
 }

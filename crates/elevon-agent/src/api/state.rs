@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bollard::plugin::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum};
-use elevon_contracts::deploy::{StaticApp, StreamEvent, WebApp};
+use elevon_contracts::deploy::StreamEvent;
 use tokio::sync::RwLock;
 
 use crate::api::db::AgentDb;
@@ -29,7 +29,7 @@ impl ApiState {
         let docker = bollard::Docker::connect_with_defaults()?;
         let env = RwLock::new(env.clone());
 
-        let proxy_socket = Socket::new(SocketType::Proxy, true)?;
+        let proxy_socket = Socket::new(SocketType::Proxy, false)?;
 
         let state = Self {
             db,
@@ -76,12 +76,6 @@ impl ApiState {
                 continue;
             }
 
-            let (web_deployment, static_web_deployment) =
-                (deployment.web.clone(), deployment.static_web.clone());
-
-            let app_name = app.name.clone();
-            let project_name = app.project.clone();
-
             let deployment_status = self.check_container_state(&container_id).await;
             if deployment_status != DeploymentStatus::Active {
                 deployment
@@ -96,13 +90,13 @@ impl ApiState {
             }
 
             let route_config = DeployAppData {
-                id: deployment.id.to_string(),
-                project: project_name,
-                name: app_name,
+                app_id: app.id.to_string(),
+                deployment_id: deployment.id.to_string(),
+                // name: app_name,
                 status: deployment_status,
                 container_id: Some(container_id),
-                web_app: web_deployment.map(|w| WebApp::from(&w)),
-                static_app: static_web_deployment.map(|s| StaticApp::from(&s)),
+                web_app: deployment.get_web_app(),
+                static_app: deployment.get_static_app(),
             };
 
             routes.push(route_config);

@@ -4,7 +4,7 @@ use std::{
     sync::LazyLock,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use bollard::{
     auth::DockerCredentials,
     plugin::{ContainerCreateBody, HostConfig, PortBinding, PortMap, RestartPolicy},
@@ -15,11 +15,12 @@ use bollard::{
 };
 use elevon_contracts::deploy::{
     AppDeployPayload, AppHealthCheckConfig, AppPayload, AppRole, AppRollbackPayload,
-    AppRuntimeOptions, RegistryVars, StaticApp, StreamEvent, StreamLogLevel, TlsType, WebApp,
+    AppRuntimeOptions, RegistryVars, StaticApp, StreamEvent, StreamLogLevel, TlsType,
 };
 use elevon_fs::agent::{
-    AppEnvOptions,
+    AgentPath, AppEnvOptions,
     env::{add_app_env_vars, load_app_env},
+    remove_app_files,
     tls::write_tls_file,
 };
 use futures_util::TryStreamExt;
@@ -34,7 +35,7 @@ use crate::{
         state::SharedApiState,
         stream::{StreamSender, emit},
     },
-    proxy::types::{AgentEvent, DeployAppData},
+    proxy::types::{AgentEvent, DeployAppData, DrainAppData},
 };
 
 static ALLOCATED_PORTS: LazyLock<RwLock<HashSet<u16>>> =
@@ -78,8 +79,7 @@ pub async fn drain_app(
     state: &SharedApiState,
     db: &mut toasty::Db,
     mut deployment: Deployment,
-    container_id: String,
-    web_app: Option<WebApp>,
+    app_data: DrainAppData,
 ) -> Result<()> {
     toasty::update!(deployment {
         status: DeploymentStatus::Drained
@@ -89,7 +89,7 @@ pub async fn drain_app(
 
     state
         .proxy_socket
-        .send(AgentEvent::DrainApp(container_id, web_app))
+        .send(AgentEvent::DrainApp(app_data))
         .await?;
 
     Ok(())
@@ -162,107 +162,124 @@ async fn deploy_app(
 
     let mut db_tx = cloned_db.transaction().await?;
 
-    let deployment = match deployment_to_run {
+    let mut deployment = match deployment_to_run {
         Some(v) => v,
         None => Deployment::create_deployment(&mut db_tx, &db_app, &app_config, new_port).await?,
     };
 
-    let web_deployment = deployment.web.clone();
-    let static_web_deployment = deployment.static_web.clone();
+    let app_env_options =
+        AppEnvOptions::app(deployment.app_id.to_string(), deployment.id.to_string());
 
-    let options = PullImageAndRunContainerOptions {
-        db_tx: &mut db_tx,
-        new_port,
-        app_config: &app_config,
-    };
+    let result: Result<()> = async {
+        let options = PullImageAndRunContainerOptions {
+            db_tx: &mut db_tx,
+            new_port,
+            app_config: &app_config,
+            app_env_options: app_env_options.clone(),
+        };
 
-    let new_deployment = pull_image_and_run_container(tx, &state, deployment, options).await?;
+        pull_image_and_run_container(tx, &state, &mut deployment, options).await?;
 
-    let app_data = DeployAppData {
-        id: new_deployment.id.to_string(),
-        project: app_config.project.to_string(),
-        name: app_config.name.to_string(),
-        container_id: new_deployment.container_id,
-        web_app: web_deployment.map(|w| WebApp::from(&w)),
-        static_app: static_web_deployment.map(|s| StaticApp::from(&s)),
-        status: DeploymentStatus::Active,
-    };
+        let app_data = DeployAppData {
+            app_id: deployment.app_id.to_string(),
+            deployment_id: deployment.id.to_string(),
+            container_id: deployment.container_id.clone(),
+            status: DeploymentStatus::Active,
+            web_app: deployment.get_web_app(),
+            static_app: deployment.get_static_app(),
+        };
 
-    if AppRole::Web == app_config.role {
-        emit(
-            tx,
-            StreamEvent::log(format!(
-                "[{}] Updating proxy routing for traffic",
-                app_config.name
-            )),
-        )
-        .await;
+        if AppRole::Web == app_config.role {
+            emit(
+                tx,
+                StreamEvent::log(format!(
+                    "[{}] Updating proxy routing for traffic",
+                    app_config.name
+                )),
+            )
+            .await;
 
-        // TODO: In case of any failure in here the container is kept running,
-        // need to be deleted.
+            // TODO: In case of any failure in here the container is kept running,
+            // need to be deleted.
 
-        state
-            .proxy_socket
-            .send(AgentEvent::UpsertRoute(app_data.clone()))
-            .await?;
+            state
+                .proxy_socket
+                .send(AgentEvent::UpsertRoute(app_data.clone()))
+                .await
+                .map_err(|err| {
+                    anyhow::anyhow!("Failed to send upsert route request: {}", err.to_string())
+                })?;
+        }
+
+        let deployment_to_drain = match deployment_to_drain {
+            Some(v) => Some(v),
+            None => Deployment::get_latest_deployment(&mut db, &db_app.id).await?,
+        };
+        let deployment_to_drain_id = deployment_to_drain.as_ref().map(|d| d.id);
+
+        // Marks the current deployment as draining, so no new requests will be handled by it,
+        // and later the DrainJanitor service will terminate the container.
+        if let Some(deployment_to_drain) = deployment_to_drain {
+            emit(
+                tx,
+                StreamEvent::log(format!(
+                    "[{}] Found previously released deployment, draining it...",
+                    app_config.name,
+                )),
+            )
+            .await;
+
+            let drain_data = DrainAppData {
+                deployment_id: deployment_to_drain.id.to_string(),
+                container_id: deployment_to_drain.container_id.clone(),
+                domain: deployment_to_drain.domain.clone(),
+                port: deployment_to_drain.web.as_ref().map(|w| w.port),
+            };
+
+            drain_app(&state, &mut db, deployment_to_drain, drain_data).await?;
+        }
+
+        if !is_rollback
+            && let Err(err) =
+                prune_old_releases(&state.docker, &mut db, &db_app, deployment_to_drain_id).await
+        {
+            emit(
+                tx,
+                StreamEvent::Log {
+                    level: StreamLogLevel::Warn,
+                    message: format!(
+                        "[{}] Failed to prune old releases: {}",
+                        app_config.name, err
+                    ),
+                },
+            )
+            .await;
+        }
+
+        db_tx.commit().await?;
+
+        Ok(())
     }
+    .await;
 
-    let deployment_to_drain = match deployment_to_drain {
-        Some(v) => Some(v),
-        None => Deployment::get_latest_deployment(&mut db, &db_app.id).await?,
-    };
-    let deployment_to_drain_id = deployment_to_drain.as_ref().map(|d| d.id);
+    match result {
+        Err(err) => {
+            remove_app_files(app_env_options)
+                .context("Failed to remove app files after deployment failure")?;
 
-    // Marks the current deployment as draining, so no new requests will be handled by it,
-    // and later the DrainJanitor service will terminate the container.
-    if let Some(deployment_to_drain) = deployment_to_drain
-        && let Some(container_id) = deployment_to_drain.container_id.clone()
-    {
-        emit(
-            tx,
-            StreamEvent::log(format!(
-                "[{}] Found previously released container, draining it...",
-                app_config.name,
-            )),
-        )
-        .await;
-
-        drain_app(
-            &state,
-            &mut db,
-            deployment_to_drain,
-            container_id,
-            app_data.web_app,
-        )
-        .await?;
+            bail!("Failed: {}", err.to_string());
+        }
+        _ => {}
     }
-
-    if !is_rollback
-        && let Err(err) =
-            prune_old_releases(&state.docker, &mut db, &db_app, deployment_to_drain_id).await
-    {
-        emit(
-            tx,
-            StreamEvent::Log {
-                level: StreamLogLevel::Warn,
-                message: format!(
-                    "[{}] Failed to prune old releases: {}",
-                    app_config.name, err
-                ),
-            },
-        )
-        .await;
-    }
-
-    db_tx.commit().await?;
 
     Ok(())
 }
 
-struct PullImageAndRunContainerOptions<'cfg, 'tx> {
-    db_tx: &'tx mut toasty::Transaction<'cfg>,
+struct PullImageAndRunContainerOptions<'a, 'tx> {
+    db_tx: &'tx mut toasty::Transaction<'a>,
     new_port: Option<u16>,
-    app_config: &'cfg AppPayload,
+    app_config: &'a AppPayload,
+    app_env_options: AppEnvOptions,
 }
 
 /// Creates Deployment, sets TLS files, sets Environment variables,
@@ -270,17 +287,15 @@ struct PullImageAndRunContainerOptions<'cfg, 'tx> {
 async fn pull_image_and_run_container(
     tx: &StreamSender,
     state: &SharedApiState,
-    mut deployment: Deployment,
+    deployment: &mut Deployment,
     options: PullImageAndRunContainerOptions<'_, '_>,
-) -> Result<Deployment> {
-    let env_options = AppEnvOptions::app(deployment.app_id.to_string(), deployment.id.to_string());
-
+) -> Result<()> {
     // Populating env variables
     if let Some(vars) = options.app_config.vars.clone() {
-        add_app_env_vars(vars, env_options.clone())?;
+        add_app_env_vars(vars, options.app_env_options.clone())?;
     }
 
-    let mut app_env_vars = load_app_env(env_options.clone())?;
+    let mut app_env_vars = load_app_env(options.app_env_options.clone())?;
 
     let pull_image_options = PullImageOptions {
         name: &options.app_config.name,
@@ -293,17 +308,25 @@ async fn pull_image_and_run_container(
     )?;
 
     if let Some(tls) = options.app_config.tls.as_ref() {
-        write_tls_file(tls.cert.as_bytes(), TlsType::Cert, env_options.clone())?;
-        write_tls_file(tls.key.as_bytes(), TlsType::Key, env_options)?;
+        write_tls_file(
+            tls.cert.as_bytes(),
+            TlsType::Cert,
+            options.app_env_options.clone(),
+        )?;
+        write_tls_file(
+            tls.key.as_bytes(),
+            TlsType::Key,
+            options.app_env_options.clone(),
+        )?;
     }
 
     if let Some(static_app) = options.app_config.static_app.as_ref() {
         handle_static_app_deployment(
             &state.docker,
             &options.app_config.image_ref,
-            &options.app_config.project,
             &options.app_config.name,
-            &deployment.id.to_string(),
+            deployment.app_id.to_string(),
+            deployment.id.to_string(),
             static_app,
         )
         .await?;
@@ -315,7 +338,7 @@ async fn pull_image_and_run_container(
             .await?;
 
         // TODO: Add log
-        return Ok(deployment);
+        return Ok(());
     }
 
     let container_id = run_container(
@@ -382,7 +405,7 @@ async fn pull_image_and_run_container(
                 .exec(options.db_tx)
                 .await?;
 
-            Ok(deployment)
+            Ok(())
         }
     }?;
 
@@ -501,32 +524,28 @@ async fn prune_old_releases(
     just_drained_id: Option<uuid::Uuid>,
 ) -> Result<()> {
     let deployments =
-        Deployment::list_by_app_id(db, &app.id, 0, app.keep_releases as usize).await?;
+        Deployment::list_by_app_id(db, &app.id, u16::MAX as usize, app.keep_releases as usize)
+            .await?;
 
-    for old in deployments {
-        if old.status == DeploymentStatus::Active || Some(old.id) == just_drained_id {
+    for old_dep in deployments {
+        if old_dep.status == DeploymentStatus::Active || Some(old_dep.id) == just_drained_id {
             continue; // never prune the one currently serving
         }
 
-        if let Some(container_id) = &old.container_id {
+        if let Some(container_id) = &old_dep.container_id {
             // best-effort, DrainJanitor may have already reaped it
             let _ = docker.remove_container(container_id, None).await;
         }
 
-        // let env_options = AppEnvOptions::app(&app.project, &app.name, &old.id.to_string());
+        let app_env_options = AppEnvOptions::app(app.id.to_string(), old_dep.id.to_string());
+        remove_app_files(app_env_options).context("Failed to remove app files")?;
 
-        // let _ = std::fs::remove_file(elevon_fs::agent::get_app_env(env_options)?);
-        // let _ = std::fs::remove_dir_all(
-        //     AgentPath::AppStaticDir(app.project.clone(), app.name.clone(), old.id.to_string())
-        //         .resolve(),
-        // );
-
-        if let Some(image_ref) = &old.image_ref {
+        if let Some(image_ref) = &old_dep.image_ref {
             let still_referenced = Deployment::filter(
                 Deployment::fields()
                     .image_ref()
                     .eq(image_ref)
-                    .and(Deployment::fields().id().ne(old.id)),
+                    .and(Deployment::fields().id().ne(old_dep.id)),
             )
             .first()
             .exec(db)
@@ -544,7 +563,7 @@ async fn prune_old_releases(
             }
         }
 
-        Deployment::delete_by_id(db, old.id).await?;
+        Deployment::delete_by_id(db, old_dep.id).await?;
     }
 
     Ok(())
@@ -553,17 +572,12 @@ async fn prune_old_releases(
 async fn handle_static_app_deployment(
     docker: &bollard::Docker,
     image_reference: &str,
-    project: &str,
     app_name: &str,
-    deployment_id: &str,
+    app_id: String,
+    deployment_id: String,
     static_app: &StaticApp,
 ) -> Result<()> {
-    // let out_dir = AgentPath::AppStaticDir(
-    //     project.to_string(),
-    //     app_name.to_string(),
-    //     deployment_id.to_string(),
-    // )
-    // .ensure_parent_dir()?;
+    let out_dir = AgentPath::AppStaticDir(app_id, deployment_id.clone()).ensure_parent_dir()?;
 
     let tmp_name = format!("{}-{}-tmp", app_name, deployment_id);
 
@@ -593,7 +607,7 @@ async fn handle_static_app_deployment(
     let cursor = Cursor::new(tar_bytes);
     let mut archive = Archive::new(cursor);
 
-    // archive.unpack(out_dir).expect("Failed to untar files");
+    archive.unpack(out_dir).expect("Failed to untar files");
 
     let remove_options = RemoveContainerOptions {
         force: true, // Forces removal even if it's somehow stuck running
@@ -719,10 +733,8 @@ async fn rollback_deployment(
         image_ref: image_ref.to_string(),
         keep_releases: app.keep_releases,
         runtime_options: runtime_options.clone(),
-        web_app: target_deployment.web.as_ref().map(|web| WebApp {
-            port: web.port,
-            domain: web.domain.clone(),
-        }),
+        web_app: target_deployment.get_web_app(),
+        static_app: target_deployment.get_static_app(),
         healthcheck: AppHealthCheckConfig::from(&deployment_options.healthcheck),
         ..Default::default()
     };

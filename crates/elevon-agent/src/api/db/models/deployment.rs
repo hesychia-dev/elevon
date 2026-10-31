@@ -26,6 +26,8 @@ pub struct Deployment {
     #[index]
     pub container_id: Option<String>,
 
+    pub domain: Option<String>,
+
     pub web: Option<DeploymentWeb>,
 
     pub static_web: Option<DeploymentStaticWeb>,
@@ -53,23 +55,29 @@ impl Deployment {
         payload: &'a AppPayload,
         port: Option<u16>,
     ) -> Result<Self> {
+        let mut domain: Option<String> = None;
+
         let web = match (&payload.web_app, port) {
-            (Some(web_app), Some(new_port)) => Some(DeploymentWeb {
-                domain: web_app.domain.clone(),
-                port: new_port,
-            }),
+            (Some(web_app), Some(new_port)) => {
+                domain = Some(web_app.domain.clone());
+                Some(DeploymentWeb { port: new_port })
+            }
             _ => None,
         };
 
-        let static_web = payload.static_app.as_ref().map(|s| DeploymentStaticWeb {
-            domain: s.domain.clone(),
-            directory: s.directory.clone(),
-            index: s.index.clone(),
-            path: s.path.clone(),
+        let static_web = payload.static_app.as_ref().map(|s| {
+            domain = Some(s.domain.clone());
+
+            DeploymentStaticWeb {
+                directory: s.directory.clone(),
+                index: s.index.clone(),
+                path: s.path.clone(),
+            }
         });
 
         let deployment = Deployment::create()
             .app_id(app.id)
+            .domain(domain)
             .web(web)
             .static_web(static_web)
             .exec(db)
@@ -137,6 +145,26 @@ impl Deployment {
 
         Ok(deployment)
     }
+
+    pub fn get_web_app(&self) -> Option<WebApp> {
+        self.web.as_ref().and_then(|w| {
+            self.domain.clone().map(|domain| WebApp {
+                domain,
+                port: w.port,
+            })
+        })
+    }
+
+    pub fn get_static_app(&self) -> Option<StaticApp> {
+        self.static_web.as_ref().and_then(|w| {
+            self.domain.clone().map(|domain| StaticApp {
+                domain,
+                directory: w.directory.clone(),
+                index: w.index.clone(),
+                path: w.path.clone(),
+            })
+        })
+    }
 }
 
 #[derive(
@@ -153,36 +181,14 @@ pub enum DeploymentStatus {
 
 #[derive(Debug, Clone, toasty::Embed)]
 pub struct DeploymentWeb {
-    pub domain: String,
     pub port: u16,
-}
-
-impl From<&DeploymentWeb> for WebApp {
-    fn from(value: &DeploymentWeb) -> Self {
-        Self {
-            domain: value.domain.clone(),
-            port: value.port,
-        }
-    }
 }
 
 #[derive(Debug, Clone, toasty::Embed)]
 pub struct DeploymentStaticWeb {
-    pub domain: String,
     pub directory: String,
     pub index: String,
     pub path: Option<String>,
-}
-
-impl From<&DeploymentStaticWeb> for StaticApp {
-    fn from(value: &DeploymentStaticWeb) -> Self {
-        Self {
-            domain: value.domain.clone(),
-            directory: value.directory.clone(),
-            index: value.index.clone(),
-            path: value.path.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Tabled, Serialize, Deserialize)]
@@ -212,11 +218,7 @@ impl TabledView for Deployment {
                 .as_deref()
                 .map(|s| s[..12.min(s.len())].to_string())
                 .unwrap_or_else(Self::default_value),
-            domain: self
-                .web
-                .as_ref()
-                .map(|w| w.domain.clone())
-                .unwrap_or_else(Self::default_value),
+            domain: self.domain.clone().unwrap_or_else(Self::default_value),
             port: self
                 .web
                 .as_ref()
