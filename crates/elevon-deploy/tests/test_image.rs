@@ -22,9 +22,18 @@ fn get_config() -> Result<(Config, RegistryConfig)> {
 #[tokio::test]
 #[cfg(feature = "heavy_tests")]
 async fn test_build_and_push_image() -> Result<()> {
+    use elevon_deploy::cli::BuildArgs;
+
     let (config, registry_config) = get_config()?;
 
-    build_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
+    build_image(
+        &config.image,
+        &registry_config,
+        &config.build,
+        CONFIG_PATH,
+        &BuildArgs::default(),
+    )
+    .await?;
     push_image(&config.image, &registry_config, &config.build, CONFIG_PATH).await?;
 
     Ok(())

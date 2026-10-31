@@ -85,10 +85,13 @@ pub struct UpgradeArgs {
     pub version: Option<String>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Default, Args)]
 pub struct BuildArgs {
     #[arg(long, short = 'P', help = "Push the image to the registry")]
     pub push: bool,
+
+    #[arg(long, help = "Buld the image with no caching")]
+    pub no_cache: bool,
 }
 
 #[derive(Debug, Args)]
