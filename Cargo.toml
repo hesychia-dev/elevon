@@ -20,7 +20,7 @@ elevon-http = { path = "./crates/elevon-http" }
 
 async-trait = "0.1.92"
 anyhow = "1"
-arc-swap = "1.9.2"
+arc-swap = "1.9.3"
 axum = "0.8.9"
 bollard = "0.21.1"
 bytes = "1.12.1"
@@ -35,7 +35,7 @@ sha2 = "0.11.1"
 strum = "0.28.0"
 strum_macros = "0.28.0"
 tar = "0.4.46"
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
 tokio-util = "0.7.20"
 toasty = { version = "0.11.0", default-features = false, features = [
   "jiff",
@@ -48,4 +48,4 @@ tracing = "0.1.44"
 tracing-indicatif = "0.3.14"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 thiserror = "2.0.21"
-uuid = { version = "1.28.0", features = ["v7"] }
+uuid = { version = "1.29.0", features = ["v7"] }
