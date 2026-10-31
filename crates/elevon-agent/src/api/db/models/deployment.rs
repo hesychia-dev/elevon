@@ -201,9 +201,12 @@ impl TabledView for Deployment {
     type TabledType = DeploymentTabled;
 
     fn to_tabled(&self) -> Self::TabledType {
+        let app = self.app.get();
+        let app_name = format!("{}:{}", app.project, app.name);
+
         Self::TabledType {
             id: self.id.to_string(),
-            app: self.app.get().name.clone(),
+            app: app_name,
             container_id: self
                 .container_id
                 .as_deref()

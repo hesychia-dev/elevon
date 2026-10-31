@@ -20,8 +20,7 @@ pub struct ApiState {
     pub db: AgentDb,
     pub docker: bollard::Docker,
     pub env: RwLock<ElevonEnv>,
-    pub proxy_socket: Arc<Socket>,
-    pub api_socket: Arc<Socket>,
+    pub proxy_socket: Socket,
 }
 
 impl ApiState {
@@ -30,15 +29,13 @@ impl ApiState {
         let docker = bollard::Docker::connect_with_defaults()?;
         let env = RwLock::new(env.clone());
 
-        let proxy_socket = Arc::new(Socket::new(SocketType::Proxy, true)?);
-        let api_socket = Arc::new(Socket::new(SocketType::Api, true)?);
+        let proxy_socket = Socket::new(SocketType::Proxy, true)?;
 
         let state = Self {
             db,
             docker,
             env,
             proxy_socket,
-            api_socket,
         };
 
         state.check_running_containers().await?;

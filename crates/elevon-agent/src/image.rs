@@ -1,4 +1,8 @@
-use std::{collections::HashSet, io::Cursor, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Cursor,
+    sync::LazyLock,
+};
 
 use anyhow::Result;
 use bollard::{
@@ -11,11 +15,12 @@ use bollard::{
 };
 use elevon_contracts::deploy::{
     AppDeployPayload, AppHealthCheckConfig, AppPayload, AppRole, AppRollbackPayload,
-    AppRuntimeOptions, StaticApp, StreamEvent, StreamLogLevel, TlsType, WebApp,
+    AppRuntimeOptions, RegistryVars, StaticApp, StreamEvent, StreamLogLevel, TlsType, WebApp,
 };
 use elevon_fs::agent::{
-    AgentPath, AppEnvOptions, TlsOptions, add_app_env, load_app_env, load_app_string_env,
-    write_tls_file,
+    AppEnvOptions,
+    env::{add_app_env_vars, load_app_env},
+    tls::write_tls_file,
 };
 use futures_util::TryStreamExt;
 use futures_util::stream::StreamExt;
@@ -34,6 +39,28 @@ use crate::{
 
 static ALLOCATED_PORTS: LazyLock<RwLock<HashSet<u16>>> =
     LazyLock::new(|| RwLock::new(HashSet::new()));
+
+fn find_free_port() -> Option<u16> {
+    for port in 3334..=9998 {
+        match elevon_http::check_port(port) {
+            Some(p) => return Some(p),
+            None => continue,
+        }
+    }
+    None
+}
+
+async fn get_free_port() -> Result<u16> {
+    let mut ports = ALLOCATED_PORTS.write().await;
+    let port = find_free_port().ok_or_else(|| anyhow::anyhow!("No free port found"))?;
+    ports.insert(port);
+    Ok(port)
+}
+
+async fn clear_port(port: &u16) {
+    let mut ports = ALLOCATED_PORTS.write().await;
+    ports.remove(port);
+}
 
 pub async fn deploy_apps(
     tx: &StreamSender,
@@ -91,211 +118,6 @@ pub async fn rollback_apps(
 
     for deployment_id_str in payload.deployment_ids {
         rollback_with_deployment(tx, state.clone(), deployment_id_str).await?;
-    }
-
-    Ok(())
-}
-
-fn find_free_port() -> Option<u16> {
-    for port in 3334..=9998 {
-        match elevon_http::check_port(port) {
-            Some(p) => return Some(p),
-            None => continue,
-        }
-    }
-    None
-}
-
-async fn get_free_port() -> Result<u16> {
-    let mut ports = ALLOCATED_PORTS.write().await;
-    let port = find_free_port().ok_or_else(|| anyhow::anyhow!("No free port found"))?;
-    ports.insert(port);
-    Ok(port)
-}
-
-async fn clear_port(port: &u16) {
-    let mut ports = ALLOCATED_PORTS.write().await;
-    ports.remove(port);
-}
-
-fn prepare_env_variables(app_config: &AppPayload, deployment_id: &str) -> Result<()> {
-    let env_options = AppEnvOptions::app(&app_config.project, &app_config.name, deployment_id);
-
-    if let Some(vars) = &app_config.vars {
-        for (key, value) in vars {
-            add_app_env(key.clone(), value.clone(), env_options.clone())?;
-        }
-    }
-
-    Ok(())
-}
-
-struct PullImageOptions<'cfg, 'dep> {
-    pub project: &'cfg str,
-    pub name: &'cfg str,
-    pub image_ref: &'cfg str,
-    pub deployment_id: &'dep str,
-}
-
-// TODO: When deploying multiple apps within the same project image is pulled on each app's deployment separately
-async fn pull_image(
-    tx: &StreamSender,
-    docker: &bollard::Docker,
-    options: PullImageOptions<'_, '_>,
-) -> Result<()> {
-    emit(
-        tx,
-        StreamEvent::log(format!(
-            "[{}] Pulling the image from registry",
-            options.name
-        )),
-    )
-    .await;
-
-    let env_options = AppEnvOptions::app(options.project, options.name, options.deployment_id);
-    let project_env = load_app_env(env_options)?;
-
-    let (registry_server, registry_username, registry_password) = match (
-        project_env.get("REGISTRY_SERVER"),
-        project_env.get("REGISTRY_USERNAME"),
-        project_env.get("REGISTRY_PASSWORD"),
-    ) {
-        (Some(s), Some(u), Some(p)) => (Some(s.clone()), Some(u.clone()), Some(p.clone())),
-        _ => (None, None, None),
-    };
-
-    let image_options = CreateImageOptionsBuilder::new()
-        .from_image(options.image_ref)
-        .build();
-
-    let credentials = Some(DockerCredentials {
-        username: registry_username,
-        password: registry_password,
-        serveraddress: registry_server,
-        ..Default::default()
-    });
-
-    let mut pull_stream = docker.create_image(Some(image_options), None, credentials);
-
-    while let Some(event) = pull_stream.try_next().await? {
-        tracing::debug!(?event, "docker pull event");
-    }
-
-    emit(
-        tx,
-        StreamEvent::log(format!("[{}] Image was pulled", options.name)),
-    )
-    .await;
-
-    Ok(())
-}
-
-async fn run_container(
-    docker: &bollard::Docker,
-    deployment: &Deployment,
-    app_config: &AppPayload,
-    new_port: Option<u16>,
-) -> Result<String> {
-    let container_name = format!("{}-{}", app_config.name, deployment.id);
-    let options = CreateContainerOptionsBuilder::new()
-        .name(&container_name)
-        .build();
-
-    let app_env_options = AppEnvOptions::app(
-        &app_config.project,
-        &app_config.name,
-        &deployment.id.to_string(),
-    );
-
-    // TODO: Currently it laods everything from the file but it should be fixed in a way like,
-    // saving env keys in db and loading them up.
-    let app_env = load_app_string_env(app_env_options)?;
-
-    let mut port_bindings = PortMap::new();
-
-    if let (Some(web_app), Some(port)) = (&app_config.web_app, new_port) {
-        port_bindings.insert(
-            format!("{}/tcp", web_app.port),
-            Some(vec![PortBinding {
-                host_ip: Some("0.0.0.0".to_string()),
-                host_port: Some(port.to_string()),
-            }]),
-        );
-    }
-
-    let host_config = Some(HostConfig {
-        restart_policy: Some(RestartPolicy {
-            name: app_config.runtime_options.restart,
-            ..Default::default()
-        }),
-        nano_cpus: app_config.runtime_options.cpu_limit,
-        memory: app_config.runtime_options.memory_limit,
-        network_mode: app_config.runtime_options.network.clone(),
-        port_bindings: Some(port_bindings),
-        ..Default::default()
-    });
-
-    let config = ContainerCreateBody {
-        image: Some(app_config.image_ref.clone()),
-        cmd: app_config.runtime_options.cmd.clone(),
-        env: Some(app_env),
-        host_config,
-        ..Default::default()
-    };
-
-    let container = docker.create_container(Some(options), config).await?;
-
-    docker.start_container(&container.id, None).await?;
-
-    Ok(container.id)
-}
-
-async fn prune_old_releases(
-    docker: &bollard::Docker,
-    db: &mut toasty::Db,
-    app: &App,
-    just_drained_id: Option<uuid::Uuid>,
-) -> Result<()> {
-    let deployments =
-        Deployment::list_by_app_id(db, &app.id, 0, app.keep_releases as usize).await?;
-
-    for old in deployments {
-        if old.status == DeploymentStatus::Active || Some(old.id) == just_drained_id {
-            continue; // never prune the one currently serving
-        }
-
-        if let Some(container_id) = &old.container_id {
-            // best-effort, DrainJanitor may have already reaped it
-            let _ = docker.remove_container(container_id, None).await;
-        }
-
-        let env_options = AppEnvOptions::app(&app.project, &app.name, &old.id.to_string());
-        let _ = std::fs::remove_file(elevon_fs::agent::get_app_env(env_options)?);
-
-        if let Some(image_ref) = &old.image_ref {
-            let still_referenced = Deployment::filter(
-                Deployment::fields()
-                    .image_ref()
-                    .eq(image_ref)
-                    .and(Deployment::fields().id().ne(old.id)),
-            )
-            .first()
-            .exec(db)
-            .await?
-            .is_some();
-
-            if !still_referenced {
-                let remove_options = RemoveImageOptions::default();
-                if let Err(err) = docker
-                    .remove_image(image_ref, Some(remove_options), None)
-                    .await
-                {
-                    tracing::warn!(%image_ref, %err, "failed to remove unreferenced image");
-                }
-            }
-        }
-
-        Deployment::delete_by_id(db, old.id).await?;
     }
 
     Ok(())
@@ -451,35 +273,35 @@ async fn pull_image_and_run_container(
     mut deployment: Deployment,
     options: PullImageAndRunContainerOptions<'_, '_>,
 ) -> Result<Deployment> {
-    prepare_env_variables(options.app_config, &deployment.id.to_string())?;
+    let env_options = AppEnvOptions::app(deployment.app_id.to_string(), deployment.id.to_string());
+
+    // Populating env variables
+    if let Some(vars) = options.app_config.vars.clone() {
+        add_app_env_vars(vars, env_options.clone())?;
+    }
+
+    let mut app_env_vars = load_app_env(env_options.clone())?;
 
     let pull_image_options = PullImageOptions {
-        project: &options.app_config.project,
         name: &options.app_config.name,
         image_ref: &options.app_config.image_ref,
-        deployment_id: &deployment.id.to_string(),
+        app_vars: &mut app_env_vars,
     };
 
     pull_image(tx, &state.docker, pull_image_options).await.inspect_err(
         |err| tracing::error!(app = %options.app_config.name, error = %err, "failed to pull image"),
     )?;
 
-    // TODO: During rollbacks previous deployment might have been running on a different
-    // domain, with different certificates, so the requests will fail due to the certs missmatch.
     if let Some(tls) = options.app_config.tls.as_ref() {
-        let tls_options = TlsOptions {
-            project: options.app_config.project.clone(),
-            app: Some(options.app_config.name.clone()),
-        };
-
-        write_tls_file(tls.cert.as_bytes(), TlsType::Cert, tls_options.clone())?;
-        write_tls_file(tls.key.as_bytes(), TlsType::Key, tls_options)?;
+        write_tls_file(tls.cert.as_bytes(), TlsType::Cert, env_options.clone())?;
+        write_tls_file(tls.key.as_bytes(), TlsType::Key, env_options)?;
     }
 
     if let Some(static_app) = options.app_config.static_app.as_ref() {
         handle_static_app_deployment(
             &state.docker,
             &options.app_config.image_ref,
+            &options.app_config.project,
             &options.app_config.name,
             &deployment.id.to_string(),
             static_app,
@@ -500,6 +322,7 @@ async fn pull_image_and_run_container(
         &state.docker,
         &deployment,
         options.app_config,
+        app_env_vars,
         options.new_port,
     )
     .await;
@@ -566,15 +389,181 @@ async fn pull_image_and_run_container(
     Ok(res)
 }
 
+struct PullImageOptions<'a> {
+    pub name: &'a str,
+    pub image_ref: &'a str,
+    pub app_vars: &'a mut HashMap<String, String>,
+}
+
+// TODO: When deploying multiple apps within the same project image is pulled on each app's deployment separately
+async fn pull_image(
+    tx: &StreamSender,
+    docker: &bollard::Docker,
+    options: PullImageOptions<'_>,
+) -> Result<()> {
+    emit(
+        tx,
+        StreamEvent::log(format!(
+            "[{}] Pulling the image from registry",
+            options.name
+        )),
+    )
+    .await;
+
+    let registry_vars = RegistryVars::get_from_vars(options.app_vars)?;
+
+    let image_options = CreateImageOptionsBuilder::new()
+        .from_image(options.image_ref)
+        .build();
+
+    let credentials = Some(DockerCredentials {
+        username: Some(registry_vars.username),
+        password: Some(registry_vars.password),
+        serveraddress: Some(registry_vars.server),
+        ..Default::default()
+    });
+
+    let mut pull_stream = docker.create_image(Some(image_options), None, credentials);
+
+    while let Some(event) = pull_stream.try_next().await? {
+        tracing::debug!(?event, "docker pull event");
+    }
+
+    emit(
+        tx,
+        StreamEvent::log(format!("[{}] Image was pulled", options.name)),
+    )
+    .await;
+
+    Ok(())
+}
+
+async fn run_container(
+    docker: &bollard::Docker,
+    deployment: &Deployment,
+    app_config: &AppPayload,
+    app_vars: HashMap<String, String>,
+    new_port: Option<u16>,
+) -> Result<String> {
+    let container_name = format!("{}-{}", app_config.name, deployment.id);
+    let options = CreateContainerOptionsBuilder::new()
+        .name(&container_name)
+        .build();
+
+    let app_env = app_vars
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+
+    let mut port_bindings = PortMap::new();
+
+    if let (Some(web_app), Some(port)) = (&app_config.web_app, new_port) {
+        port_bindings.insert(
+            format!("{}/tcp", web_app.port),
+            Some(vec![PortBinding {
+                host_ip: Some("0.0.0.0".to_string()),
+                host_port: Some(port.to_string()),
+            }]),
+        );
+    }
+
+    let host_config = Some(HostConfig {
+        restart_policy: Some(RestartPolicy {
+            name: app_config.runtime_options.restart,
+            ..Default::default()
+        }),
+        nano_cpus: app_config.runtime_options.cpu_limit,
+        memory: app_config.runtime_options.memory_limit,
+        network_mode: app_config.runtime_options.network.clone(),
+        port_bindings: Some(port_bindings),
+        ..Default::default()
+    });
+
+    let config = ContainerCreateBody {
+        image: Some(app_config.image_ref.clone()),
+        cmd: app_config.runtime_options.cmd.clone(),
+        env: Some(app_env),
+        host_config,
+        ..Default::default()
+    };
+
+    let container = docker.create_container(Some(options), config).await?;
+
+    docker.start_container(&container.id, None).await?;
+
+    Ok(container.id)
+}
+
+async fn prune_old_releases(
+    docker: &bollard::Docker,
+    db: &mut toasty::Db,
+    app: &App,
+    just_drained_id: Option<uuid::Uuid>,
+) -> Result<()> {
+    let deployments =
+        Deployment::list_by_app_id(db, &app.id, 0, app.keep_releases as usize).await?;
+
+    for old in deployments {
+        if old.status == DeploymentStatus::Active || Some(old.id) == just_drained_id {
+            continue; // never prune the one currently serving
+        }
+
+        if let Some(container_id) = &old.container_id {
+            // best-effort, DrainJanitor may have already reaped it
+            let _ = docker.remove_container(container_id, None).await;
+        }
+
+        // let env_options = AppEnvOptions::app(&app.project, &app.name, &old.id.to_string());
+
+        // let _ = std::fs::remove_file(elevon_fs::agent::get_app_env(env_options)?);
+        // let _ = std::fs::remove_dir_all(
+        //     AgentPath::AppStaticDir(app.project.clone(), app.name.clone(), old.id.to_string())
+        //         .resolve(),
+        // );
+
+        if let Some(image_ref) = &old.image_ref {
+            let still_referenced = Deployment::filter(
+                Deployment::fields()
+                    .image_ref()
+                    .eq(image_ref)
+                    .and(Deployment::fields().id().ne(old.id)),
+            )
+            .first()
+            .exec(db)
+            .await?
+            .is_some();
+
+            if !still_referenced {
+                let remove_options = RemoveImageOptions::default();
+                if let Err(err) = docker
+                    .remove_image(image_ref, Some(remove_options), None)
+                    .await
+                {
+                    tracing::warn!(%image_ref, %err, "failed to remove unreferenced image");
+                }
+            }
+        }
+
+        Deployment::delete_by_id(db, old.id).await?;
+    }
+
+    Ok(())
+}
+
 async fn handle_static_app_deployment(
     docker: &bollard::Docker,
     image_reference: &str,
+    project: &str,
     app_name: &str,
     deployment_id: &str,
     static_app: &StaticApp,
 ) -> Result<()> {
-    let out_dir = AgentPath::AppStaticDir(app_name.to_string(), deployment_id.to_string())
-        .ensure_parent_dir()?;
+    // let out_dir = AgentPath::AppStaticDir(
+    //     project.to_string(),
+    //     app_name.to_string(),
+    //     deployment_id.to_string(),
+    // )
+    // .ensure_parent_dir()?;
 
     let tmp_name = format!("{}-{}-tmp", app_name, deployment_id);
 
@@ -604,7 +593,7 @@ async fn handle_static_app_deployment(
     let cursor = Cursor::new(tar_bytes);
     let mut archive = Archive::new(cursor);
 
-    archive.unpack(out_dir).expect("Failed to untar files");
+    // archive.unpack(out_dir).expect("Failed to untar files");
 
     let remove_options = RemoveContainerOptions {
         force: true, // Forces removal even if it's somehow stuck running

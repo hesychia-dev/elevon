@@ -36,7 +36,6 @@ pub struct ProxyState {
     pub runtime: DashMap<String, Arc<BackendRuntime>>,
     pub dynamic_cert: DynamicCert,
     pub proxy_socket: Arc<Socket>,
-    pub api_socket: Arc<Socket>,
 }
 
 impl ProxyState {
@@ -58,7 +57,6 @@ impl ProxyState {
         };
 
         let proxy_socket = Socket::new(SocketType::Proxy, false)?;
-        let api_socket = Socket::new(SocketType::Api, false)?;
 
         Ok(Arc::new(ProxyState {
             agent: agent_state,
@@ -68,7 +66,6 @@ impl ProxyState {
             runtime: DashMap::new(),
             dynamic_cert,
             proxy_socket: Arc::new(proxy_socket),
-            api_socket: Arc::new(api_socket),
         }))
     }
 
@@ -385,7 +382,7 @@ impl ProxyState {
         let guard = self.routes.load();
         let routes = guard.get(host)?;
 
-        let static_app = routes.iter().find_map(|route| {
+        let _static_app = routes.iter().find_map(|route| {
             route
                 .static_app
                 .as_ref()

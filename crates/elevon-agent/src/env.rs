@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use elevon_fs::agent::{AppEnvOptions, add_app_env, load_app_env};
+use elevon_fs::agent::{
+    AppEnvOptions,
+    env::{add_app_env, load_app_env},
+};
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
 
@@ -50,7 +53,7 @@ impl ElevonEnv {
     }
 
     pub fn load() -> Result<Self> {
-        let vars = load_app_env(AppEnvOptions::elevon())?;
+        let vars = load_app_env(AppEnvOptions::agent())?;
         let mut env = Self::default();
 
         for key in ElevonEnvKey::all() {
@@ -92,7 +95,7 @@ impl ElevonEnv {
         add_app_env(
             key.bare_name().to_string(),
             persisted,
-            AppEnvOptions::elevon(),
+            AppEnvOptions::agent(),
         )?;
 
         Ok(())

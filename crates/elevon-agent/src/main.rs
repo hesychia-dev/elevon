@@ -24,6 +24,11 @@ fn run() -> Result<()> {
         return elevon_agent::cli::init::run_init().context("init command failed");
     }
 
+    if let Commands::Install(args) = cli.command {
+        return run_async(elevon_agent::cli::install::run_install(cli.args, args))
+            .context("install command failed");
+    }
+
     // This still needs the current user to be in `elevon-agent` group to run without sudo.
     if let Commands::Key { subcommand } = cli.command {
         return run_async(KeyCommands::run(subcommand)).context("key command failed");
@@ -42,14 +47,10 @@ fn run() -> Result<()> {
 
     match cli.command {
         Commands::Init => unreachable!(),
+        Commands::Install(_) => unreachable!(),
         Commands::Upgrade(_) => unreachable!(),
         Commands::Key { subcommand: _ } => unreachable!(),
         Commands::App { subcommand: _ } => unreachable!(),
-
-        Commands::Install(args) => {
-            run_async(elevon_agent::cli::install::run_install(cli.args, args))
-                .context("install command failed")?;
-        }
 
         Commands::Uninstall(args) => {
             elevon_agent::cli::install::run_uninstall(args).context("uninstall command failed")?;
