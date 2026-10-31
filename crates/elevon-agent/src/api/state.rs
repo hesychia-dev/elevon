@@ -68,15 +68,16 @@ impl ApiState {
         for mut deployment in deployments {
             let app = deployment.app.get();
 
-            let Some(container_id) = deployment.container_id.clone() else {
-                continue;
-            };
-
             if deployment.web.is_none() && deployment.static_web.is_none() {
                 continue;
             }
 
-            let deployment_status = self.check_container_state(&container_id).await;
+            let deployment_status = if let Some(container_id) = &deployment.container_id {
+                self.check_container_state(container_id).await
+            } else {
+                deployment.status.clone()
+            };
+
             if deployment_status != DeploymentStatus::Active {
                 deployment
                     .update()
@@ -94,7 +95,7 @@ impl ApiState {
                 deployment_id: deployment.id.to_string(),
                 // name: app_name,
                 status: deployment_status,
-                container_id: Some(container_id),
+                container_id: deployment.container_id.clone(),
                 web_app: deployment.get_web_app(),
                 static_app: deployment.get_static_app(),
             };

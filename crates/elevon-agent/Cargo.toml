@@ -6,6 +6,7 @@ default-run = "elevon-agent"
 
 [dependencies]
 dashmap = "6.2.1"
+mime_guess = "2.0.5"
 pingora = { version = "0.9.0", features = ["lb", "proxy", "boringssl"] }
 tokio-stream = "0.1.19"
 tabled = "0.22.0"

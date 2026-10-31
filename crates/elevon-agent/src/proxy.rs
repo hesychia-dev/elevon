@@ -25,7 +25,10 @@ use pingora::{
 
 use crate::{
     env::ElevonEnv,
-    proxy::{socket::SocketControl, state::ProxyState},
+    proxy::{
+        socket::SocketControl,
+        state::{ProxyState, not_found_response},
+    },
 };
 
 pub struct RequestCtx {
@@ -95,10 +98,12 @@ impl ProxyHttp for Proxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        self.state.handle_static_app_request(
-            session.req_header().uri.host(),
-            session.req_header().uri.path(),
-        );
+        if let Ok(file_found) = self.state.handle_static_app_request(session).await {
+            if !file_found {
+                let _ = not_found_response(session).await;
+            }
+            return Ok(true);
+        }
 
         if let Some(deployment_id) = ctx.deployment_id.clone() {
             self.state.increase_inflight_count(&deployment_id);
