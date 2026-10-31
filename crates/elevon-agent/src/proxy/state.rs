@@ -321,39 +321,35 @@ impl ProxyState {
     }
 
     pub fn remove_backend(&self, deployment_id: &str) {
-        let backend_runtime = self.runtime.remove(deployment_id);
+        let Some((_, _)) = self.runtime.remove(deployment_id) else {
+            return;
+        };
 
-        if let Some((_, backend_runtime)) = backend_runtime {
-            if backend_runtime.route.is_none() {
-                return;
+        let web_domains: Vec<String> = self
+            .routes
+            .load()
+            .iter()
+            .filter(|(_, routes)| {
+                routes
+                    .iter()
+                    .any(|r| r.deployment_id == deployment_id && r.web_app.is_some())
+            })
+            .map(|(domain, _)| domain.clone())
+            .collect();
+
+        self.routes.rcu(|current| {
+            let mut next = current.as_ref().clone();
+
+            for backends in next.values_mut() {
+                backends.retain(|b| b.deployment_id != deployment_id);
             }
 
-            let domains: Vec<String> = self
-                .routes
-                .load()
-                .iter()
-                .filter(|(_, routes)| {
-                    routes
-                        .iter()
-                        .any(|route| route.deployment_id == deployment_id)
-                })
-                .map(|(domain, _)| domain.clone())
-                .collect();
+            next.retain(|_, backends| !backends.is_empty());
+            next
+        });
 
-            self.routes.rcu(|current| {
-                let mut next = current.as_ref().clone();
-
-                for backends in next.values_mut() {
-                    backends.retain(|backend| backend.deployment_id != deployment_id);
-                }
-
-                next.retain(|_, backends| !backends.is_empty());
-                next
-            });
-
-            for domain in domains {
-                self.rebuild_load_balancer(domain);
-            }
+        for domain in web_domains {
+            self.rebuild_load_balancer(domain);
         }
     }
 
@@ -418,6 +414,9 @@ impl ProxyState {
         let (app_id, deployment_id, static_app) = routes
             .iter()
             .find_map(|route| {
+                if route.status != DeploymentStatus::Active {
+                    return None;
+                }
                 route
                     .static_app
                     .as_ref()
