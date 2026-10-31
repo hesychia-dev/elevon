@@ -1,6 +1,6 @@
 [package]
 name = "elevon-agent"
-version = "0.2.2-beta"
+version = "0.2.2-beta.1"
 edition = "2024"
 default-run = "elevon-agent"
 
