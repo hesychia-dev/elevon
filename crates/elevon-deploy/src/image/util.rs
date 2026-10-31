@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::{config::{BuildConfig, BuildOptions}, util::get_file_walker};
+use crate::{
+    config::{BuildConfig, BuildOptions},
+    util::get_file_walker,
+};
 
 pub fn image_reference(registry_server: &str, image_name: &str, tag: &str) -> String {
     format!(
