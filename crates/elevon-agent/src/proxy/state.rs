@@ -286,35 +286,42 @@ impl ProxyState {
         }
     }
 
-    pub fn ready_to_terminate(&self, grace_period: Duration) -> Vec<String> {
+    /// Returns (deployment_id, Some(container_id))
+    pub fn ready_to_terminate(&self, grace_period: Duration) -> Vec<(String, Option<String>)> {
         self.runtime
             .iter()
             .filter_map(|r| {
+                let deployment_id = r.key();
                 let runtime = r.value();
+
+                // If not drained, filter it out entirely
                 if runtime.status != DeploymentStatus::Drained {
                     return None;
                 }
 
-                let Some(route) = runtime.route.as_ref() else {
-                    return runtime.container_id.clone();
+                let container_opt = match runtime.route.as_ref() {
+                    Some(route) => {
+                        let inflight = route.inflight.load(std::sync::atomic::Ordering::Relaxed);
+                        let past_grace = route
+                            .drain_started_at
+                            .is_some_and(|t| t.elapsed() >= grace_period);
+
+                        if inflight == 0 || past_grace {
+                            runtime.container_id.clone()
+                        } else {
+                            None
+                        }
+                    }
+                    None => runtime.container_id.clone(),
                 };
 
-                let inflight = route.inflight.load(std::sync::atomic::Ordering::Relaxed);
-                let past_grace = route
-                    .drain_started_at
-                    .is_some_and(|t| t.elapsed() >= grace_period);
-
-                if inflight == 0 || past_grace {
-                    runtime.container_id.clone()
-                } else {
-                    None
-                }
+                Some((deployment_id.to_string(), container_opt))
             })
             .collect()
     }
 
-    pub fn remove_backend(&self, container_id: &str) {
-        let backend_runtime = self.runtime.remove(container_id);
+    pub fn remove_backend(&self, deployment_id: &str) {
+        let backend_runtime = self.runtime.remove(deployment_id);
 
         if let Some((_, backend_runtime)) = backend_runtime {
             if backend_runtime.route.is_none() {
@@ -328,7 +335,7 @@ impl ProxyState {
                 .filter(|(_, routes)| {
                     routes
                         .iter()
-                        .any(|route| route.container_id.as_deref() == Some(container_id))
+                        .any(|route| route.deployment_id == deployment_id)
                 })
                 .map(|(domain, _)| domain.clone())
                 .collect();
@@ -337,8 +344,7 @@ impl ProxyState {
                 let mut next = current.as_ref().clone();
 
                 for backends in next.values_mut() {
-                    backends
-                        .retain(|backend| backend.container_id.as_deref() != Some(container_id));
+                    backends.retain(|backend| backend.deployment_id != deployment_id);
                 }
 
                 next.retain(|_, backends| !backends.is_empty());
@@ -422,7 +428,9 @@ impl ProxyState {
 
         let static_dir = AgentPath::AppStaticDir(app_id, deployment_id);
 
-        let Some(file_path) = get_static_app_file(&static_dir, path, &static_app.directory) else {
+        let Some(file_path) =
+            get_static_app_file(&static_dir, path, &static_app.directory, &static_app.index)
+        else {
             return Ok(false);
         };
 

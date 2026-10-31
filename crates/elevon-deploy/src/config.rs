@@ -15,7 +15,7 @@ use crate::{
     agent::{
         AgentClient, DeployService, prepare_apps_deploy_payload, prepare_apps_rollback_payload,
     },
-    cli::AppRollbackArgs,
+    cli::{AppRollbackArgs, BuildArgs},
     config::{app::AppConfig, env::EnvConfig, registry::RegistryConfig},
     image::progress::print_success,
 };
@@ -67,13 +67,18 @@ impl Config {
         &self,
         registry_config: &RegistryConfig,
         config_path: String,
-        push: bool,
+        args: BuildArgs,
     ) -> Result<()> {
-        let built =
-            crate::image::build_image(&self.image, registry_config, &self.build, &config_path)
-                .await?;
+        let built = crate::image::build_image(
+            &self.image,
+            registry_config,
+            &self.build,
+            &config_path,
+            &args,
+        )
+        .await?;
 
-        if built && push {
+        if built && args.push {
             self.run_push(registry_config, &config_path).await?;
             return Ok(());
         }
@@ -87,6 +92,65 @@ impl Config {
         config_path: &str,
     ) -> Result<()> {
         crate::image::push_image(&self.image, registry_config, &self.build, config_path).await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(name = "deploy", skip_all)]
+    pub async fn run_deploy(
+        &self,
+        agent_client: AgentClient,
+        app_names: &[String],
+        registry_config: RegistryConfig,
+        config_path: &str,
+    ) -> Result<()> {
+        let selected_apps = self.get_selected_apps(app_names)?;
+        let build_args = BuildArgs {
+            push: true,
+            ..Default::default()
+        };
+
+        self.run_build(&registry_config, config_path.to_string(), build_args)
+            .await?;
+
+        let app_names: Vec<_> = selected_apps.iter().map(|(key, _)| key).collect();
+        tracing::Span::current().pb_set_message(&format!("deploying {}", self.name));
+        tracing::info!("Deploying apps: {:?}", app_names);
+
+        let payload = prepare_apps_deploy_payload(
+            self,
+            &registry_config,
+            selected_apps,
+            config_path,
+            &self.build,
+        )?;
+
+        let deploy_service = DeployService::new(agent_client);
+        deploy_service.push_deploy(payload).await?;
+
+        print_success(&format!("Deployed {}", self.name));
+
+        Ok(())
+    }
+
+    #[tracing::instrument(name = "rollback", skip_all)]
+    pub async fn run_rollback(
+        &self,
+        agent_client: AgentClient,
+        args: AppRollbackArgs,
+    ) -> Result<()> {
+        let selected_apps = self.get_selected_apps(&args.apps)?;
+
+        let app_names: Vec<_> = selected_apps.iter().map(|(key, _)| key).collect();
+        tracing::Span::current().pb_set_message(&format!("rolling back {}", self.name));
+        tracing::info!("Rolling back apps: {:?}", app_names);
+
+        let payload = prepare_apps_rollback_payload(self, selected_apps, args.ids)?;
+
+        let deploy_service = DeployService::new(agent_client);
+        deploy_service.push_rollback(payload).await?;
+
+        print_success(&format!("Rolled back {}", self.name));
+
         Ok(())
     }
 
@@ -136,61 +200,6 @@ impl Config {
                     .ok_or_else(|| anyhow::anyhow!("unknown app `{name}`"))
             })
             .collect()
-    }
-
-    #[tracing::instrument(name = "deploy", skip_all)]
-    pub async fn run_deploy(
-        &self,
-        agent_client: AgentClient,
-        app_names: &[String],
-        registry_config: RegistryConfig,
-        config_path: &str,
-    ) -> Result<()> {
-        let selected_apps = self.get_selected_apps(app_names)?;
-
-        self.run_build(&registry_config, config_path.to_string(), true)
-            .await?;
-
-        let app_names: Vec<_> = selected_apps.iter().map(|(key, _)| key).collect();
-        tracing::Span::current().pb_set_message(&format!("deploying {}", self.name));
-        tracing::info!("Deploying apps: {:?}", app_names);
-
-        let payload = prepare_apps_deploy_payload(
-            self,
-            &registry_config,
-            selected_apps,
-            config_path,
-            &self.build,
-        )?;
-
-        let deploy_service = DeployService::new(agent_client);
-        deploy_service.push_deploy(payload).await?;
-
-        print_success(&format!("Deployed {}", self.name));
-
-        Ok(())
-    }
-
-    #[tracing::instrument(name = "rollback", skip_all)]
-    pub async fn run_rollback(
-        &self,
-        agent_client: AgentClient,
-        args: AppRollbackArgs,
-    ) -> Result<()> {
-        let selected_apps = self.get_selected_apps(&args.apps)?;
-
-        let app_names: Vec<_> = selected_apps.iter().map(|(key, _)| key).collect();
-        tracing::Span::current().pb_set_message(&format!("rolling back {}", self.name));
-        tracing::info!("Rolling back apps: {:?}", app_names);
-
-        let payload = prepare_apps_rollback_payload(self, selected_apps, args.ids)?;
-
-        let deploy_service = DeployService::new(agent_client);
-        deploy_service.push_rollback(payload).await?;
-
-        print_success(&format!("Rolled back {}", self.name));
-
-        Ok(())
     }
 }
 

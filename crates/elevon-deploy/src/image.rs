@@ -11,6 +11,7 @@ use bollard::{
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
 use crate::{
+    cli::BuildArgs,
     config::{BuildConfig, registry::RegistryConfig},
     image::util::BuildContextProps,
     util::get_image_tag,
@@ -28,6 +29,7 @@ pub async fn build_image(
     registry_config: &RegistryConfig,
     build_config: &BuildConfig,
     config_path: &str,
+    build_args: &BuildArgs,
 ) -> Result<bool> {
     let docker = Docker::connect_with_local_defaults()?;
 
@@ -38,22 +40,24 @@ pub async fn build_image(
         config_path.to_string(),
     )?;
 
-    let image_exists = match docker
-        .inspect_registry_image(
-            &image_props.image_reference,
-            Some(image_props.credentials.clone()),
-        )
-        .await
-    {
-        Ok(_) => true,
-        Err(bollard::errors::Error::DockerResponseServerError {
-            status_code: 404, ..
-        }) => false,
-        Err(err) => bail!("failed to inspect registry image: {}", err),
-    };
+    if !build_args.no_cache {
+        let image_exists = match docker
+            .inspect_registry_image(
+                &image_props.image_reference,
+                Some(image_props.credentials.clone()),
+            )
+            .await
+        {
+            Ok(_) => true,
+            Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 404, ..
+            }) => false,
+            Err(err) => bail!("failed to inspect registry image: {}", err),
+        };
 
-    if image_exists && image_props.image_tag != "modified" {
-        return Ok(false);
+        if image_exists && image_props.image_tag != "modified" {
+            return Ok(false);
+        }
     }
 
     let status_msg = format!("building {}", image_props.image_reference);
@@ -63,6 +67,7 @@ pub async fn build_image(
         .dockerfile(&image_props.build_context.dockerfile)
         .t(&image_props.image_reference)
         .rm(true)
+        .nocache(build_args.no_cache)
         .build();
 
     let tar = util::tar_context(image_props.build_context)?;

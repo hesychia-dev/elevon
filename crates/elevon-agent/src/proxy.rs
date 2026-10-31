@@ -163,7 +163,7 @@ impl BackgroundService for DrainJanitor {
                 _ = shutdown.changed() => break,
                 _ = tick.tick() => {
                     let grace = Duration::from_secs(30);
-                    for container_id in self.state.ready_to_terminate(grace) {
+                    for (deployment_id, container_id) in self.state.ready_to_terminate(grace) {
                         // A scenario where this container is a worker, that is working on a task
                         // that takes 60s to finish, `stop_container` will forcefully kill the container,
                         // since Docker first sends SIGTERM, wait for ~10 seconds and then if the container,
@@ -171,21 +171,24 @@ impl BackgroundService for DrainJanitor {
                         // Meaning the worker might not have finished the task it was working on.
                         //
                         // A solution to this would be having a configurable timeout option in `apps.runtime` settings.
-                        if let Err(err) = self.state.docker
-                            .stop_container(&container_id, None)
-                            .await
-                        {
-                            tracing::warn!(%container_id, %err, "failed to stop container");
-                            // TODO: If it fails just delete from the db
-                            continue;
+
+                        if let Some(container_id) = container_id {
+                            if let Err(err) = self.state.docker
+                                .stop_container(&container_id, None)
+                                .await
+                            {
+                                tracing::warn!(%container_id, %err, "failed to stop container");
+                                // TODO: If it fails just delete from the db
+                                continue;
+                            }
+
+                            let _ = self.state.docker
+                                .remove_container(&container_id, None)
+                                .await;
                         }
 
-                        let _ = self.state.docker
-                            .remove_container(&container_id, None)
-                            .await;
-
-                        self.state.remove_backend(&container_id);
-                        tracing::info!(%container_id, "drained container terminated");
+                        self.state.remove_backend(&deployment_id);
+                        tracing::info!(%deployment_id, "drained deployment terminated");
                         let routes = self.state.routes.load();
                         tracing::info!("current routes: {:?}", routes);
                     }

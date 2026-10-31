@@ -57,7 +57,7 @@ pub async fn run_deploy_cli(
         Commands::Upgrade(_) => unreachable!(),
         Commands::Build(args) => {
             config
-                .run_build(&registry_credentials, config_path, args.push)
+                .run_build(&registry_credentials, config_path, args)
                 .await?;
         }
         Commands::Push => {

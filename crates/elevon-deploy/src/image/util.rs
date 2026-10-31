@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::config::{BuildConfig, BuildOptions};
+use crate::{config::{BuildConfig, BuildOptions}, util::get_file_walker};
 
 pub fn image_reference(registry_server: &str, image_name: &str, tag: &str) -> String {
     format!(
@@ -17,7 +17,7 @@ pub fn image_reference(registry_server: &str, image_name: &str, tag: &str) -> St
 pub struct BuildContextProps {
     pub context_dir: PathBuf,
     pub dockerfile: String,
-    pub dockerignore_path: Option<PathBuf>,
+    pub dockerignore_filename: String,
 }
 
 pub fn get_build_context(
@@ -44,12 +44,11 @@ pub fn get_build_context(
     let context = match build_config {
         BuildConfig::Path(path) => {
             let context_dir = resolve_context_dir(path)?;
-            let dockerignore_path = config_dir.join(".dockerignore").canonicalize().ok();
 
             BuildContextProps {
                 context_dir,
                 dockerfile: "Dockerfile".to_string(),
-                dockerignore_path,
+                dockerignore_filename: ".dockerignore".to_string(),
             }
         }
         BuildConfig::Options(BuildOptions { path, dockerfile }) => {
@@ -58,18 +57,10 @@ pub fn get_build_context(
                 .clone()
                 .unwrap_or_else(|| "Dockerfile".to_string());
 
-            // In case of 'Dockerfile' having a suffix
-            let dockerignore_path = dockerfile
-                .strip_suffix(".")
-                .map(|s| context_dir.join(format!(".dockerignore.{s}")))
-                .unwrap_or_else(|| context_dir.join(path).join(".dockerignore"))
-                .canonicalize()
-                .ok();
-
             BuildContextProps {
                 context_dir,
+                dockerignore_filename: format!("{dockerfile}.dockerignore"),
                 dockerfile,
-                dockerignore_path,
             }
         }
     };
@@ -78,17 +69,10 @@ pub fn get_build_context(
 }
 
 pub fn tar_context(build_context: BuildContextProps) -> Result<Vec<u8>> {
-    use ignore::WalkBuilder;
     use std::fs::File;
     use tar::{Builder, EntryType, Header, HeaderMode};
 
-    let mut walker = WalkBuilder::new(&build_context.context_dir);
-
-    if let Some(dockerignore_path) = build_context.dockerignore_path {
-        walker.add_custom_ignore_filename(dockerignore_path);
-    }
-
-    let walker = walker.build();
+    let walker = get_file_walker(&build_context);
 
     let mut ar = Builder::new(Vec::new());
     ar.mode(HeaderMode::Deterministic);
@@ -110,6 +94,7 @@ pub fn tar_context(build_context: BuildContextProps) -> Result<Vec<u8>> {
 
         let mut header = Header::new_gnu();
         header.set_entry_type(EntryType::Regular);
+        // TODO: preserve file modes (exec bit) and handle symlinks instead of forcing 0o644.
         header.set_mode(0o644);
         header.set_size(metadata.len());
         header.set_path(relative_path)?;
@@ -140,8 +125,6 @@ mod tests {
                 .and_then(|n| n.to_str()),
             Some("elevon-deploy")
         );
-
-        assert!(build_context.dockerignore_path.is_none());
 
         Ok(())
     }
