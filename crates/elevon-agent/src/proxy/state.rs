@@ -464,7 +464,6 @@ pub async fn not_found_response(session: &mut Session) -> Result<()> {
 }
 
 async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> Result<()> {
-    println!("file_path: {:?}", file_path);
     let file = File::open(&file_path).await?;
 
     let mut header = ResponseHeader::build(200, None)?;
