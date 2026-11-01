@@ -139,8 +139,7 @@ pub struct AppPayload {
     pub role: AppRole,
     pub runtime_options: AppRuntimeOptions,
     pub healthcheck: AppHealthCheckConfig,
-    // TODO: In the future routing could be optional I think...
-    pub routing: AppRoutingConfig,
+    pub routing: Option<AppRoutingConfig>,
     pub vars: Option<HashMap<String, String>>,
 }
 

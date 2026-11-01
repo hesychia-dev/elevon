@@ -52,10 +52,10 @@ impl Deployment {
         payload: &'a AppPayload,
         port: Option<u16>,
     ) -> Result<Self> {
-        let routing = DeploymentRouting {
+        let routing = payload.routing.as_ref().map(|r| DeploymentRouting {
             port,
-            ..DeploymentRouting::from(&payload.routing)
-        };
+            ..DeploymentRouting::from(r)
+        });
 
         let deployment = Deployment::create()
             .app_id(app.id)
