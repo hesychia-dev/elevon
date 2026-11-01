@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::atomic::AtomicUsize, time::Instant};
 
-use elevon_contracts::deploy::{StaticApp, WebApp};
+use elevon_contracts::deploy::config::AppRoutingConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::api::db::models::DeploymentStatus;
@@ -18,8 +18,9 @@ pub struct DeployAppData {
     pub deployment_id: String,
     pub status: DeploymentStatus,
     pub container_id: Option<String>,
-    pub web_app: Option<WebApp>,
-    pub static_app: Option<StaticApp>,
+    pub routing: Option<AppRoutingConfig>,
+    // pub web_app: Option<WebApp>,
+    // pub static_app: Option<StaticApp>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

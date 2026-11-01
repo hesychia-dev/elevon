@@ -1,12 +1,15 @@
+pub mod config;
+
 use std::collections::HashMap;
 
 use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
 use bytes::Bytes;
-use elevon_config::{ConfigError, ResolveEnvCredentials, resolve_env_or_literal};
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
+
+use crate::deploy::config::{AppHealthCheckConfig, AppRoutingConfig};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -116,20 +119,6 @@ pub enum AppRole {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ParseAppRoleError;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebApp {
-    pub port: u16,
-    pub domain: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StaticApp {
-    pub domain: String,
-    pub directory: String,
-    pub index: String,
-    pub path: Option<String>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppRuntimeOptions {
@@ -138,23 +127,6 @@ pub struct AppRuntimeOptions {
     pub memory_limit: Option<i64>,
     pub cpu_limit: Option<i64>,
     pub network: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TlsConfig {
-    pub cert: String,
-    pub key: String,
-}
-
-impl ResolveEnvCredentials for TlsConfig {
-    type Output = Self;
-
-    fn resolved_credentials(&self) -> Result<Self::Output, ConfigError> {
-        Ok(Self {
-            cert: resolve_env_or_literal(&self.cert)?,
-            key: resolve_env_or_literal(&self.key)?,
-        })
-    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -167,78 +139,14 @@ pub struct AppPayload {
     pub role: AppRole,
     pub runtime_options: AppRuntimeOptions,
     pub healthcheck: AppHealthCheckConfig,
+    // TODO: In the future routing could be optional I think...
+    pub routing: AppRoutingConfig,
     pub vars: Option<HashMap<String, String>>,
-    pub tls: Option<TlsConfig>,
-    pub web_app: Option<WebApp>,
-    pub static_app: Option<StaticApp>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppDeployPayload {
     pub apps: Vec<AppPayload>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppHealthCheckConfig {
-    #[serde(default = "AppHealthCheckConfig::default_start_period")]
-    pub start_period: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_interval")]
-    pub interval: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_timeout")]
-    pub timeout: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_retries")]
-    pub retries: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_stabilization")]
-    pub stabilization: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_required_successes")]
-    pub required_successes: u64,
-
-    pub path: Option<String>,
-}
-
-impl AppHealthCheckConfig {
-    pub fn default_start_period() -> u64 {
-        5
-    }
-
-    fn default_interval() -> u64 {
-        5
-    }
-
-    fn default_timeout() -> u64 {
-        30
-    }
-
-    fn default_retries() -> u64 {
-        3
-    }
-
-    fn default_stabilization() -> u64 {
-        5
-    }
-
-    fn default_required_successes() -> u64 {
-        1
-    }
-}
-
-impl Default for AppHealthCheckConfig {
-    fn default() -> Self {
-        Self {
-            start_period: AppHealthCheckConfig::default_start_period(),
-            interval: AppHealthCheckConfig::default_interval(),
-            timeout: AppHealthCheckConfig::default_timeout(),
-            retries: AppHealthCheckConfig::default_retries(),
-            stabilization: AppHealthCheckConfig::default_stabilization(),
-            required_successes: AppHealthCheckConfig::default_required_successes(),
-            path: None,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
