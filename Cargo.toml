@@ -8,7 +8,6 @@ members = [
   "crates/elevon-deploy",
   "crates/elevon-fs",
   "crates/elevon-http",
-  "crates/elevon-server",
 ]
 
 [workspace.dependencies]
