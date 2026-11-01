@@ -4,8 +4,8 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use elevon_config::ResolveEnvCredentials;
 use elevon_contracts::deploy::{
-    AppDeployPayload, AppPayload, AppRole, AppRollback, AppRollbackPayload, AppRuntimeOptions,
-    StaticApp, WebApp, log_stream_events,
+    AppDeployPayload, AppPayload, AppRollback, AppRollbackPayload, AppRuntimeOptions,
+    config::AppRoutingConfig, log_stream_events,
 };
 use reqwest::{
     Client, Url,
@@ -143,32 +143,6 @@ pub fn prepare_apps_deploy_payload(
                 .map(|tls| tls.resolved_credentials())
                 .transpose()?;
 
-            let (web_app, static_app): (Option<WebApp>, Option<StaticApp>) = match &cfg.role {
-                AppRole::Web => {
-                    let resolved_routing = config.routing.resolved_credentials()?;
-
-                    if let Some(static_files) = resolved_routing.static_files {
-                        (
-                            None,
-                            Some(static_files.to_static_app(resolved_routing.domain)),
-                        )
-                    } else {
-                        if let Some(port) = resolved_routing.port {
-                            (
-                                Some(WebApp {
-                                    port,
-                                    domain: resolved_routing.domain,
-                                }),
-                                None,
-                            )
-                        } else {
-                            (None, None)
-                        }
-                    }
-                }
-                AppRole::Worker => (None, None),
-            };
-
             let cmd = cfg.cmd.as_ref().and_then(|c| shlex::split(c));
             let runtime_config = cfg.runtime.clone().unwrap_or_default();
 
@@ -178,6 +152,11 @@ pub fn prepare_apps_deploy_payload(
                 cpu_limit: runtime_config.cpu.as_ref().map(|c| c.nano_cpus()),
                 memory_limit: runtime_config.memory.as_ref().map(|m| m.bytes()),
                 network: runtime_config.network,
+            };
+
+            let app_routing = AppRoutingConfig {
+                tls: tls_with_credentials,
+                ..(config.routing).clone()
             };
 
             Ok(Some(AppPayload {
@@ -195,9 +174,7 @@ pub fn prepare_apps_deploy_payload(
                     .unwrap_or_else(|| Config::default_keep_releases().unwrap()),
                 runtime_options,
                 vars: Some(vars),
-                tls: tls_with_credentials,
-                web_app,
-                static_app,
+                routing: app_routing,
             }))
         })
         .collect::<Result<Vec<_>>>()?
@@ -236,6 +213,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use elevon_config::ElevonConfig;
+    use elevon_contracts::deploy::AppRole;
 
     use super::*;
 

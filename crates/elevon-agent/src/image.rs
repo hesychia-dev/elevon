@@ -14,8 +14,9 @@ use bollard::{
     },
 };
 use elevon_contracts::deploy::{
-    AppDeployPayload, AppHealthCheckConfig, AppPayload, AppRole, AppRollbackPayload,
-    AppRuntimeOptions, RegistryVars, StaticApp, StreamEvent, StreamLogLevel, TlsType,
+    AppDeployPayload, AppPayload, AppRole, AppRollbackPayload, AppRuntimeOptions, RegistryVars,
+    StreamEvent, StreamLogLevel, TlsType,
+    config::{AppHealthCheckConfig, AppRoutingConfig, StaticConfig},
 };
 use elevon_fs::agent::{
     AgentPath, AppEnvOptions,
@@ -142,7 +143,7 @@ async fn deploy_app(
     )
     .await;
 
-    let new_port = match app_config.web_app {
+    let new_port = match app_config.routing.port {
         Some(_) => Some(get_free_port().await?),
         _ => None,
     };
@@ -185,8 +186,10 @@ async fn deploy_app(
             deployment_id: deployment.id.to_string(),
             container_id: deployment.container_id.clone(),
             status: DeploymentStatus::Active,
-            web_app: deployment.get_web_app(),
-            static_app: deployment.get_static_app(),
+            routing: deployment
+                .routing
+                .as_ref()
+                .map(|r| AppRoutingConfig::from(r)),
         };
 
         if AppRole::Web == app_config.role {
@@ -229,8 +232,11 @@ async fn deploy_app(
             let drain_data = DrainAppData {
                 deployment_id: deployment_to_drain.id.to_string(),
                 container_id: deployment_to_drain.container_id.clone(),
-                domain: deployment_to_drain.domain.clone(),
-                port: deployment_to_drain.web.as_ref().map(|w| w.port),
+                domain: deployment_to_drain
+                    .routing
+                    .as_ref()
+                    .map(|r| r.domain.clone()),
+                port: deployment_to_drain.routing.as_ref().and_then(|r| r.port),
             };
 
             drain_app(&state, &mut db, deployment_to_drain, drain_data).await?;
@@ -301,7 +307,7 @@ async fn pull_image_and_run_container(
         |err| tracing::error!(app = %options.app_config.name, error = %err, "failed to pull image"),
     )?;
 
-    if let Some(tls) = options.app_config.tls.as_ref() {
+    if let Some(tls) = options.app_config.routing.tls.as_ref() {
         write_tls_file(
             tls.cert.as_bytes(),
             TlsType::Cert,
@@ -314,7 +320,7 @@ async fn pull_image_and_run_container(
         )?;
     }
 
-    if let Some(static_app) = options.app_config.static_app.as_ref() {
+    if let Some(static_app) = options.app_config.routing.static_files.as_ref() {
         handle_static_app_deployment(
             &state.docker,
             &options.app_config.image_ref,
@@ -474,12 +480,13 @@ async fn run_container(
 
     let mut port_bindings = PortMap::new();
 
-    if let (Some(web_app), Some(port)) = (&app_config.web_app, new_port) {
+    if let (Some(internal_port), Some(exposed_port)) = (&app_config.routing.resolved_port, new_port)
+    {
         port_bindings.insert(
-            format!("{}/tcp", web_app.port),
+            format!("{}/tcp", internal_port),
             Some(vec![PortBinding {
                 host_ip: Some("0.0.0.0".to_string()),
-                host_port: Some(port.to_string()),
+                host_port: Some(exposed_port.to_string()),
             }]),
         );
     }
@@ -575,7 +582,7 @@ async fn handle_static_app_deployment(
     app_name: &str,
     app_id: String,
     deployment_id: String,
-    static_app: &StaticApp,
+    static_app: &StaticConfig,
 ) -> Result<()> {
     let out_dir = AgentPath::AppStaticDir(app_id, deployment_id.clone()).ensure_parent_dir()?;
 
@@ -733,8 +740,12 @@ async fn rollback_deployment(
         image_ref: image_ref.to_string(),
         keep_releases: app.keep_releases,
         runtime_options: runtime_options.clone(),
-        web_app: target_deployment.get_web_app(),
-        static_app: target_deployment.get_static_app(),
+        routing: target_deployment
+            .routing
+            .as_ref()
+            .map(|r| AppRoutingConfig::from(r)),
+        // web_app: target_deployment.get_web_app(),
+        // static_app: target_deployment.get_static_app(),
         healthcheck: AppHealthCheckConfig::from(&deployment_options.healthcheck),
         ..Default::default()
     };

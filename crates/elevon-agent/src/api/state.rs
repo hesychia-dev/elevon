@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use bollard::plugin::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum};
 use elevon_contracts::deploy::StreamEvent;
+use elevon_contracts::deploy::config::AppRoutingConfig;
 use tokio::sync::RwLock;
 
 use crate::api::db::AgentDb;
@@ -68,7 +69,7 @@ impl ApiState {
         for mut deployment in deployments {
             let app = deployment.app.get();
 
-            if deployment.web.is_none() && deployment.static_web.is_none() {
+            if deployment.routing.is_none() {
                 continue;
             }
 
@@ -93,11 +94,9 @@ impl ApiState {
             let route_config = DeployAppData {
                 app_id: app.id.to_string(),
                 deployment_id: deployment.id.to_string(),
-                // name: app_name,
                 status: deployment_status,
                 container_id: deployment.container_id.clone(),
-                web_app: deployment.get_web_app(),
-                static_app: deployment.get_static_app(),
+                routing: deployment.routing.as_ref().map(AppRoutingConfig::from),
             };
 
             routes.push(route_config);
