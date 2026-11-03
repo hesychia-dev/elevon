@@ -35,7 +35,7 @@ pub struct Config {
 
     pub build: BuildConfig,
 
-    pub routing: Option<AppRoutingConfig>,
+    pub routing: AppRoutingConfig,
 
     pub env: Option<EnvConfig>,
 

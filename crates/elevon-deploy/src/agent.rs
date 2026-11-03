@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use elevon_config::ResolveEnvCredentials;
 use elevon_contracts::deploy::{
-    AppDeployPayload, AppPayload, AppRollback, AppRollbackPayload, AppRuntimeOptions,
+    AppDeployPayload, AppPayload, AppRole, AppRollback, AppRollbackPayload, AppRuntimeOptions,
     config::AppRoutingConfig, log_stream_events,
 };
 use reqwest::{
@@ -154,9 +154,12 @@ pub fn prepare_apps_deploy_payload(
                 network: runtime_config.network,
             };
 
-            let app_routing = AppRoutingConfig {
-                tls: tls_with_credentials,
-                ..(config.routing).clone()
+            let app_routing = match cfg.role {
+                AppRole::Web => Some(AppRoutingConfig {
+                    tls: tls_with_credentials,
+                    ..(config.routing).clone()
+                }),
+                AppRole::Worker => None,
             };
 
             Ok(Some(AppPayload {
