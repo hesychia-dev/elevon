@@ -12,6 +12,7 @@ use arc_swap::ArcSwap;
 use axum::http::HeaderValue;
 use bytes::Bytes;
 use dashmap::DashMap;
+use elevon_contracts::deploy::config::StaticConfig;
 use elevon_fs::agent::{AgentPath, get_static_app_file};
 use futures_util::StreamExt;
 use pingora::{
@@ -119,15 +120,11 @@ impl ProxyState {
     }
 
     pub fn upsert_route(&self, route: DeployAppData) {
-        let (domain, port) = match &route.web_app {
-            Some(web_app) => (Some(web_app.domain.clone()), Some(web_app.port)),
-            None => match &route.static_app {
-                Some(static_app) => (Some(static_app.domain.clone()), None),
-                None => (None, None),
-            },
-        };
-
-        let Some(domain) = domain else {
+        let Some((domain, port)) = route
+            .routing
+            .as_ref()
+            .map(|r| (r.domain.clone(), r.resolved_port))
+        else {
             tracing::warn!(deployment = %&route.deployment_id, "refusing application route on non web app");
             return;
         };
@@ -173,10 +170,25 @@ impl ProxyState {
                 backends.push(route.clone());
             }
 
+            // Sorting routes based on paths, longest -> shortest
+            backends.sort_by(|a, b| {
+                let b_len = b
+                    .routing
+                    .as_ref()
+                    .and_then(|r| r.path_prefix.as_deref())
+                    .map_or(0, |p| p.len());
+                let a_len = a
+                    .routing
+                    .as_ref()
+                    .and_then(|r| r.path_prefix.as_deref())
+                    .map_or(0, |p| p.len());
+                b_len.cmp(&a_len)
+            });
+
             next
         });
 
-        // Getting to this means that its a static app so we don't need to touch LB
+        // Having no port means that its a static app so we don't need to touch LB
         let Some(port) = port else {
             tracing::info!("Routes changed, current state: {:?}", self.routes.load());
             return;
@@ -332,7 +344,7 @@ impl ProxyState {
             .filter(|(_, routes)| {
                 routes
                     .iter()
-                    .any(|r| r.deployment_id == deployment_id && r.web_app.is_some())
+                    .any(|r| r.deployment_id == deployment_id && r.routing.is_some())
             })
             .map(|(domain, _)| domain.clone())
             .collect();
@@ -360,14 +372,14 @@ impl ProxyState {
             .get(&domain)
             .into_iter()
             .flatten()
-            .filter_map(|route| {
-                let web_app = route.web_app.clone()?;
+            .filter_map(|app| {
+                let port = app.routing.clone()?.resolved_port?;
 
-                if route.status != DeploymentStatus::Active {
+                if app.status != DeploymentStatus::Active {
                     return None;
                 }
 
-                Some(format!("127.0.0.1:{}", web_app.port))
+                Some(format!("127.0.0.1:{}", port))
             })
             .collect();
 
@@ -411,25 +423,23 @@ impl ProxyState {
         let guard = self.routes.load();
         let routes = guard.get(domain).context("Route not found")?;
 
-        let (app_id, deployment_id, static_app) = routes
-            .iter()
-            .find_map(|route| {
-                if route.status != DeploymentStatus::Active {
-                    return None;
-                }
-                route
-                    .static_app
-                    .as_ref()
-                    .filter(|app| app.path.as_deref().is_none_or(|p| path.starts_with(p)))
-                    .map(|s| (route.app_id.clone(), route.deployment_id.clone(), s))
-            })
-            .context("Static app not found")?;
+        let (app_id, deployment_id, static_app) =
+            find_static_app(routes, path).context("Static app not found")?;
 
         let static_dir = AgentPath::AppStaticDir(app_id, deployment_id);
 
-        let Some(file_path) =
-            get_static_app_file(&static_dir, path, &static_app.directory, &static_app.index)
-        else {
+        let clean_path = static_app
+            .path
+            .as_deref()
+            .and_then(|p| path.strip_prefix(p))
+            .unwrap_or(path);
+
+        let Some(file_path) = get_static_app_file(
+            &static_dir,
+            clean_path,
+            &static_app.directory,
+            &static_app.index,
+        ) else {
             return Ok(false);
         };
 
@@ -439,6 +449,35 @@ impl ProxyState {
 
         Ok(true)
     }
+}
+
+fn find_based_on_path() {}
+
+fn find_static_app<'a>(
+    apps: &'a [DeployAppData],
+    path: &'a str,
+) -> Option<(String, String, &'a StaticConfig)> {
+    apps.iter().find_map(|app| {
+        if app.status != DeploymentStatus::Active {
+            return None;
+        }
+        let Some(routing) = app.routing else {
+            return None;
+        };
+
+        routing.static_files.as_ref().filter(|static_files| {})
+
+        // route.routing.as_ref().filter
+        //     .static_app
+        //     .as_ref()
+        //     .filter(|app| {
+        //         app.path.as_deref().is_none_or(|p| {
+        //             let rest = path.strip_prefix(p).unwrap_or(path);
+        //             rest.starts_with('/') || rest.starts_with('?')
+        //         })
+        //     })
+        //     .map(|s| (route.app_id.clone(), route.deployment_id.clone(), s))
+    })
 }
 
 fn extract_domain(host: &HeaderValue) -> Option<&str> {
@@ -498,6 +537,44 @@ async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // #[test]
+    // fn test_find_static_app() {
+    //     let placeholder = "test";
+
+    //     let app_1 = DeployAppData {
+    //         app_id: placeholder.to_string(),
+    //         deployment_id: placeholder.to_string(),
+    //         status: DeploymentStatus::Active,
+    //         static_app: Some(StaticApp {
+    //             domain: placeholder.to_string(),
+    //             directory: placeholder.to_string(),
+    //             index: placeholder.to_string(),
+    //             path: Some("/api/v1".to_string()),
+    //         }),
+    //         ..Default::default()
+    //     };
+
+    //     let app_2 = DeployAppData {
+    //         app_id: placeholder.to_string(),
+    //         deployment_id: placeholder.to_string(),
+    //         status: DeploymentStatus::Active,
+    //         static_app: Some(StaticApp {
+    //             domain: placeholder.to_string(),
+    //             directory: placeholder.to_string(),
+    //             index: placeholder.to_string(),
+    //             path: Some("/api".to_string()),
+    //         }),
+    //         ..Default::default()
+    //     };
+
+    //     let mut routes: Vec<DeployAppData> = vec![app_1, app_2];
+    //     routes.sort_by(|a, b| b.);
+
+    //     let selected_1 = find_static_app(&routes, "/api/v1/test");
+
+    //     println!("selected: {:?}", selected_1);
+    // }
 
     #[test]
     fn test_extract_domain() -> Result<()> {

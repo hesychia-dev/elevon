@@ -3,7 +3,8 @@ use std::str::FromStr;
 use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
 use elevon_contracts::deploy::{
-    AppHealthCheckConfig, AppPayload, AppRuntimeOptions, StaticApp, WebApp,
+    AppPayload, AppRuntimeOptions,
+    config::{AppHealthCheckConfig, AppRoutingConfig, StaticConfig},
 };
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
@@ -21,16 +22,12 @@ pub struct Deployment {
     pub app_id: uuid::Uuid,
 
     #[index]
-    pub image_ref: Option<String>,
+    pub image_ref: String,
 
     #[index]
     pub container_id: Option<String>,
 
-    pub domain: Option<String>,
-
-    pub web: Option<DeploymentWeb>,
-
-    pub static_web: Option<DeploymentStaticWeb>,
+    pub routing: Option<DeploymentRouting>,
 
     #[default(DeploymentStatus::Pending)]
     pub status: DeploymentStatus,
@@ -49,37 +46,17 @@ pub struct Deployment {
 }
 
 impl Deployment {
-    pub async fn create_deployment<'a>(
-        db: &mut toasty::Transaction<'a>,
-        app: &'a App,
-        payload: &'a AppPayload,
-        port: Option<u16>,
+    pub async fn create_deployment(
+        db: &mut toasty::Transaction<'_>,
+        app: &App,
+        payload: &AppPayload,
     ) -> Result<Self> {
-        let mut domain: Option<String> = None;
-
-        let web = match (&payload.web_app, port) {
-            (Some(web_app), Some(new_port)) => {
-                domain = Some(web_app.domain.clone());
-                Some(DeploymentWeb { port: new_port })
-            }
-            _ => None,
-        };
-
-        let static_web = payload.static_app.as_ref().map(|s| {
-            domain = Some(s.domain.clone());
-
-            DeploymentStaticWeb {
-                directory: s.directory.clone(),
-                index: s.index.clone(),
-                path: s.path.clone(),
-            }
-        });
+        let routing = payload.routing.as_ref().map(DeploymentRouting::from);
 
         let deployment = Deployment::create()
             .app_id(app.id)
-            .domain(domain)
-            .web(web)
-            .static_web(static_web)
+            .image_ref(payload.image_ref.clone())
+            .routing(routing)
             .exec(db)
             .await?;
 
@@ -88,6 +65,7 @@ impl Deployment {
         DeploymentOption::create()
             .deployment_id(deployment.id)
             .runtime(runtime_options)
+            .role(AppRoleDb::from(&payload.role))
             .exec(db)
             .await?;
 
@@ -145,26 +123,6 @@ impl Deployment {
 
         Ok(deployment)
     }
-
-    pub fn get_web_app(&self) -> Option<WebApp> {
-        self.web.as_ref().and_then(|w| {
-            self.domain.clone().map(|domain| WebApp {
-                domain,
-                port: w.port,
-            })
-        })
-    }
-
-    pub fn get_static_app(&self) -> Option<StaticApp> {
-        self.static_web.as_ref().and_then(|w| {
-            self.domain.clone().map(|domain| StaticApp {
-                domain,
-                directory: w.directory.clone(),
-                index: w.index.clone(),
-                path: w.path.clone(),
-            })
-        })
-    }
 }
 
 #[derive(
@@ -181,15 +139,58 @@ pub enum DeploymentStatus {
 }
 
 #[derive(Debug, Clone, toasty::Embed)]
-pub struct DeploymentWeb {
-    pub port: u16,
+pub struct DeploymentRouting {
+    pub domain: String,
+    pub path_prefix: Option<String>,
+    pub port: Option<u16>,
+    pub static_files: Option<DeploymentStaticWeb>,
+}
+
+impl From<&AppRoutingConfig> for DeploymentRouting {
+    fn from(value: &AppRoutingConfig) -> Self {
+        Self {
+            domain: value.domain.clone(),
+            path_prefix: value.path_prefix.clone(),
+            port: value.resolved_port,
+            static_files: value.static_files.as_ref().map(DeploymentStaticWeb::from),
+        }
+    }
+}
+
+impl From<&DeploymentRouting> for AppRoutingConfig {
+    fn from(value: &DeploymentRouting) -> Self {
+        Self {
+            domain: value.domain.clone(),
+            path_prefix: value.path_prefix.clone(),
+            resolved_port: value.port,
+            static_files: value.static_files.as_ref().map(StaticConfig::from),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, toasty::Embed)]
 pub struct DeploymentStaticWeb {
     pub directory: String,
     pub index: String,
-    pub path: Option<String>,
+}
+
+impl From<&StaticConfig> for DeploymentStaticWeb {
+    fn from(value: &StaticConfig) -> Self {
+        Self {
+            directory: value.directory.clone(),
+            index: value.index.clone(),
+        }
+    }
+}
+
+impl From<&DeploymentStaticWeb> for StaticConfig {
+    fn from(value: &DeploymentStaticWeb) -> Self {
+        Self {
+            directory: value.directory.clone(),
+            index: value.index.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Tabled, Serialize, Deserialize)]
@@ -219,12 +220,17 @@ impl TabledView for Deployment {
                 .as_deref()
                 .map(|s| s[..12.min(s.len())].to_string())
                 .unwrap_or_else(Self::default_value),
-            domain: self.domain.clone().unwrap_or_else(Self::default_value),
-            port: self
-                .web
-                .as_ref()
-                .map(|w| w.port.to_string())
+            domain: self
+                .routing
+                .clone()
+                .map(|r| r.domain)
                 .unwrap_or_else(Self::default_value),
+            port: self
+                .routing
+                .as_ref()
+                .and_then(|r| r.port)
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| Self::default_value()),
             status: self.status.to_string(),
             updated_at: self.updated_at.to_string(),
             created_at: self.created_at.to_string(),
