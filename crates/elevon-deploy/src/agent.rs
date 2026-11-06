@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use elevon_config::ResolveEnvCredentials;
 use elevon_contracts::deploy::{
-    AppDeployPayload, AppPayload, AppRole, AppRollback, AppRollbackPayload, AppRuntimeOptions,
+    AppDeployPayload, AppPayload, AppRollback, AppRollbackPayload, AppRuntimeOptions,
     config::AppRoutingConfig, log_stream_events,
 };
 use reqwest::{
@@ -130,6 +130,8 @@ pub fn prepare_apps_deploy_payload(
     let apps_payload: Vec<AppPayload> = selected_apps
         .iter()
         .map(|(name, cfg)| -> Result<Option<AppPayload>> {
+            let routing = config.routing_for_deploy(&cfg.role)?;
+
             let mut vars = cfg
                 .env
                 .as_ref()
@@ -154,13 +156,10 @@ pub fn prepare_apps_deploy_payload(
                 network: runtime_config.network,
             };
 
-            let app_routing = match cfg.role {
-                AppRole::Web => Some(AppRoutingConfig {
-                    tls: tls_with_credentials,
-                    ..(config.routing).clone()
-                }),
-                AppRole::Worker => None,
-            };
+            let app_routing = routing.map(|routing| AppRoutingConfig {
+                tls: tls_with_credentials,
+                ..routing.clone()
+            });
 
             Ok(Some(AppPayload {
                 image_ref: crate::image::util::image_reference(
@@ -176,8 +175,8 @@ pub fn prepare_apps_deploy_payload(
                     .keep_releases
                     .unwrap_or_else(|| Config::default_keep_releases().unwrap()),
                 runtime_options,
-                vars: Some(vars),
                 routing: app_routing,
+                vars,
             }))
         })
         .collect::<Result<Vec<_>>>()?
@@ -299,6 +298,94 @@ mod tests {
         assert_eq!(payload.apps[0].project, "project-name");
         assert_eq!(payload.apps[0].name, "web");
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_deploy_routing_and_rollback_without_project_routing() -> Result<()> {
+        let registry = RegistryConfig {
+            server: "test".to_string(),
+            username: "test".to_string(),
+            password: "test".to_string(),
+        };
+        let mut config = Config::default();
+        config.apps.insert(
+            "worker".to_string(),
+            AppConfig {
+                role: AppRole::Worker,
+                ..Default::default()
+            },
+        );
+        config.apps.insert("web".to_string(), AppConfig::default());
+
+        let web = config.get_selected_apps(&["web".to_string()])?;
+        assert!(
+            prepare_apps_deploy_payload(
+                &config,
+                &registry,
+                web,
+                "templates/config.yml",
+                &config.build
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("requires project routing")
+        );
+        let web = config.get_selected_apps(&["web".to_string()])?;
+        let rollback = prepare_apps_rollback_payload(&config, web, vec![])?;
+        assert_eq!(rollback.apps[0].name, "web");
+
+        let worker = config.get_selected_apps(&["worker".to_string()])?;
+        let payload = prepare_apps_deploy_payload(
+            &config,
+            &registry,
+            worker,
+            "templates/config.yml",
+            &config.build,
+        )?;
+        assert!(payload.apps[0].routing.is_none());
+
+        config.routing = Some(AppRoutingConfig {
+            domain: "example.com".to_string(),
+            port: Some(elevon_contracts::deploy::config::PortConfig::Literal(3000)),
+            ..Default::default()
+        });
+        let selected = config.get_selected_apps(&["web".to_string(), "worker".to_string()])?;
+        let payload = prepare_apps_deploy_payload(
+            &config,
+            &registry,
+            selected,
+            "templates/config.yml",
+            &config.build,
+        )?;
+        assert_eq!(
+            payload.apps[0].routing.as_ref().unwrap().domain,
+            "example.com"
+        );
+        assert!(payload.apps[1].routing.is_none());
+
+        config.routing.as_mut().unwrap().static_files =
+            Some(elevon_contracts::deploy::config::StaticConfig {
+                directory: "/public".to_string(),
+                index: "index.html".to_string(),
+            });
+        config.routing.as_mut().unwrap().port = None;
+        let web = config.get_selected_apps(&["web".to_string()])?;
+        let payload = prepare_apps_deploy_payload(
+            &config,
+            &registry,
+            web,
+            "templates/config.yml",
+            &config.build,
+        )?;
+        assert!(
+            payload.apps[0]
+                .routing
+                .as_ref()
+                .unwrap()
+                .static_files
+                .is_some()
+        );
         Ok(())
     }
 

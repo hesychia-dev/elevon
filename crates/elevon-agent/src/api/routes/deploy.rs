@@ -16,7 +16,7 @@ use crate::{
         state::SharedApiState,
         stream::{StreamResponse, lock_action, spawn_streaming_task},
     },
-    image::{deploy_apps, rollback_apps},
+    deployment::{deploy_apps, rollback_apps},
     proxy::types::DeployAppData,
 };
 

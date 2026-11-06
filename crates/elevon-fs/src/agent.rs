@@ -422,7 +422,7 @@ pub fn remove_app_files(options: AppEnvOptions) -> Result<()> {
 
     let dir = AgentPath::AppDeploymentDir(options.app_id, deployment_id).resolve();
 
-    let _ = std::fs::remove_dir_all(dir);
+    std::fs::remove_dir_all(dir)?;
 
     Ok(())
 }

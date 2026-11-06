@@ -91,13 +91,7 @@ where
 
     tokio::spawn(async move {
         if let Err(err) = op(tx_for_task.clone()).await {
-            emit(
-                &tx_for_task,
-                StreamEvent::Error {
-                    message: err.to_string(),
-                },
-            )
-            .await;
+            emit(&tx_for_task, StreamEvent::error(format!("{err:#}"))).await;
         }
 
         emit(&tx_for_task, StreamEvent::Done).await;

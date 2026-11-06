@@ -1,13 +1,16 @@
+mod container;
+mod errors;
+
 use std::{
     collections::{HashMap, HashSet},
     io::Cursor,
-    sync::LazyLock,
+    sync::{Arc, LazyLock},
 };
 
 use anyhow::{Context, Result, bail};
 use bollard::{
     auth::DockerCredentials,
-    plugin::{ContainerCreateBody, HostConfig, PortBinding, PortMap, RestartPolicy},
+    plugin::ContainerCreateBody,
     query_parameters::{
         CreateContainerOptionsBuilder, CreateImageOptionsBuilder, DownloadFromContainerOptions,
         RemoveContainerOptions, RemoveImageOptions,
@@ -42,6 +45,35 @@ use crate::{
 static ALLOCATED_PORTS: LazyLock<RwLock<HashSet<u16>>> =
     LazyLock::new(|| RwLock::new(HashSet::new()));
 
+pub struct DeploymentService {
+    docker: Arc<bollard::Docker>,
+    db: toasty::Db,
+}
+
+impl DeploymentService {
+    pub fn new(docker: Arc<bollard::Docker>, db: toasty::Db) -> Self {
+        Self { docker, db }
+    }
+
+    pub async fn deploy(&self, tx: StreamSender, apps: Vec<AppPayload>) -> Result<()> {
+        for app in apps {
+            emit(
+                &tx,
+                StreamEvent::log(format!("[{}] Deploying...", app.name)),
+            )
+            .await;
+
+            new_deploy(&self, &tx, app).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn rollback(&self) {}
+
+    pub async fn drain(&self) {}
+}
+
 fn find_free_port() -> Option<u16> {
     for port in 3334..=9998 {
         match elevon_http::check_port(port) {
@@ -63,6 +95,195 @@ async fn clear_port(port: &u16) {
     let mut ports = ALLOCATED_PORTS.write().await;
     ports.remove(port);
 }
+
+#[derive(Debug, Default)]
+struct DeploymentResources {
+    port: Option<u16>,
+    container_id: Option<String>,
+}
+
+struct ActionState<'a> {
+    docker: Arc<bollard::Docker>,
+    tx: &'a StreamSender,
+    app_name: &'a str,
+}
+
+async fn new_deploy(
+    service: &DeploymentService,
+    tx: &StreamSender,
+    app_config: AppPayload,
+) -> Result<()> {
+    if app_config.role == AppRole::Worker && app_config.routing.is_some() {
+        bail!("Worker can't have routing configuration");
+    }
+
+    if app_config.role == AppRole::Web && app_config.routing.is_none() {
+        bail!("Web must have routing configuration");
+    }
+
+    let action_state = ActionState {
+        docker: service.docker.clone(),
+        tx,
+        app_name: &app_config.name,
+    };
+
+    let mut app_vars = app_config.vars.clone();
+
+    container::pull_image(&action_state, &app_config.image_ref, &mut app_vars).await?;
+
+    let mut db = service.db.clone();
+    let mut db_clone = db.clone();
+    let mut db_tx = db_clone.transaction().await?;
+
+    let mut deployment = prepare_deployment(&mut db_tx, &app_config).await?;
+
+    db_tx.commit().await?;
+
+    let mut resources = DeploymentResources::default();
+
+    let result = deploy_steps(
+        service,
+        &action_state,
+        &mut deployment,
+        &app_config,
+        &mut resources,
+        app_vars,
+    )
+    .await;
+
+    if let Err(err) = result {
+        let failures = errors::cleanup_failed_deployment(
+            &action_state,
+            &mut db,
+            &mut deployment,
+            &mut resources,
+        )
+        .await;
+
+        if !failures.is_empty() {
+            return Err(err.context(format!("Cleanup failures: {}", failures.join("; "))));
+        }
+
+        return Err(err.context("Deployment failed"));
+    }
+
+    Ok(())
+}
+
+async fn prepare_deployment(
+    db_tx: &mut toasty::Transaction<'_>,
+    app_config: &AppPayload,
+) -> Result<Deployment> {
+    let app = App::get_or_create(db_tx, app_config).await?;
+    Ok(Deployment::create_deployment(db_tx, &app, app_config).await?)
+}
+
+async fn deploy_steps(
+    service: &DeploymentService,
+    action_state: &ActionState<'_>,
+    deployment: &mut Deployment,
+    app_config: &AppPayload,
+    resources: &mut DeploymentResources,
+    app_vars: HashMap<String, String>,
+) -> Result<()> {
+    prepare_app_files(
+        &deployment,
+        service.docker.clone(),
+        resources,
+        &app_config.name,
+        &app_config.image_ref,
+        app_vars.clone(),
+        app_config.routing.as_ref(),
+    )
+    .await
+    .context("Failed to prepare app files")?;
+
+    let is_static = app_config
+        .routing
+        .as_ref()
+        .is_some_and(|routing| routing.static_files.is_some());
+
+    if !is_static {
+        let new_port = match app_config.role {
+            AppRole::Web => Some(get_free_port().await?),
+            _ => None,
+        };
+
+        resources.port = new_port;
+
+        let container_id = container::create_container(
+            action_state,
+            &deployment,
+            &app_config,
+            &app_vars,
+            new_port,
+        )
+        .await
+        .context("Failed to create container")?;
+
+        resources.container_id = Some(container_id.clone());
+
+        service
+            .docker
+            .start_container(&container_id, None)
+            .await
+            .context("Failed to start container")?;
+    }
+
+    Ok(())
+}
+
+/// Populates environment variables, tls certs and static app files
+async fn prepare_app_files(
+    deployment: &Deployment,
+    docker: Arc<bollard::Docker>,
+    resources: &mut DeploymentResources,
+    app_name: &str,
+    image_reference: &str,
+    app_vars: HashMap<String, String>,
+    routing_config: Option<&AppRoutingConfig>,
+) -> Result<()> {
+    let app_env_options =
+        AppEnvOptions::app(deployment.app_id.to_string(), deployment.id.to_string());
+
+    if let Some(routing) = routing_config {
+        if let Some(tls) = routing.tls.as_ref() {
+            write_tls_file(tls.cert.as_bytes(), TlsType::Cert, app_env_options.clone())?;
+            write_tls_file(tls.key.as_bytes(), TlsType::Key, app_env_options.clone())?;
+        }
+
+        if let Some(static_files) = &routing.static_files {
+            handle_static_app_deployment(
+                &docker,
+                resources,
+                image_reference,
+                app_name,
+                deployment.app_id.to_string(),
+                deployment.id.to_string(),
+                &static_files,
+            )
+            .await?;
+
+            // Returning early because static apps can't read environment variables
+            return Ok(());
+        }
+    }
+
+    add_app_env_vars(app_vars, app_env_options)?;
+
+    Ok(())
+}
+
+//
+
+//
+//
+//
+
+//
+//
+//
+//
 
 pub async fn deploy_apps(
     tx: &StreamSender,
@@ -461,63 +682,6 @@ async fn pull_image(
     Ok(())
 }
 
-async fn run_container(
-    docker: &bollard::Docker,
-    deployment: &Deployment,
-    app_config: &AppPayload,
-    app_vars: HashMap<String, String>,
-    new_port: Option<u16>,
-) -> Result<String> {
-    let container_name = format!("{}-{}", app_config.name, deployment.id);
-    let options = CreateContainerOptionsBuilder::new()
-        .name(&container_name)
-        .build();
-
-    let app_env = app_vars
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect();
-
-    let mut port_bindings = PortMap::new();
-
-    if let (Some(internal_port), Some(exposed_port)) = (&app_config.routing.resolved_port, new_port)
-    {
-        port_bindings.insert(
-            format!("{}/tcp", internal_port),
-            Some(vec![PortBinding {
-                host_ip: Some("0.0.0.0".to_string()),
-                host_port: Some(exposed_port.to_string()),
-            }]),
-        );
-    }
-
-    let host_config = Some(HostConfig {
-        restart_policy: Some(RestartPolicy {
-            name: app_config.runtime_options.restart,
-            ..Default::default()
-        }),
-        nano_cpus: app_config.runtime_options.cpu_limit,
-        memory: app_config.runtime_options.memory_limit,
-        network_mode: app_config.runtime_options.network.clone(),
-        port_bindings: Some(port_bindings),
-        ..Default::default()
-    });
-
-    let config = ContainerCreateBody {
-        image: Some(app_config.image_ref.clone()),
-        cmd: app_config.runtime_options.cmd.clone(),
-        env: Some(app_env),
-        host_config,
-        ..Default::default()
-    };
-
-    let container = docker.create_container(Some(options), config).await?;
-
-    docker.start_container(&container.id, None).await?;
-
-    Ok(container.id)
-}
-
 async fn prune_old_releases(
     docker: &bollard::Docker,
     db: &mut toasty::Db,
@@ -578,11 +742,12 @@ async fn prune_old_releases(
 
 async fn handle_static_app_deployment(
     docker: &bollard::Docker,
+    resources: &mut DeploymentResources,
     image_reference: &str,
     app_name: &str,
     app_id: String,
     deployment_id: String,
-    static_app: &StaticConfig,
+    static_config: &StaticConfig,
 ) -> Result<()> {
     let out_dir = AgentPath::AppStaticDir(app_id, deployment_id.clone()).ensure_parent_dir()?;
 
@@ -591,6 +756,7 @@ async fn handle_static_app_deployment(
     let options = CreateContainerOptionsBuilder::default()
         .name(&tmp_name)
         .build();
+
     let config = ContainerCreateBody {
         image: Some(image_reference.to_string()),
         cmd: Some(vec!["x".to_string()]),
@@ -599,30 +765,36 @@ async fn handle_static_app_deployment(
 
     let container = docker.create_container(Some(options), config).await?;
 
+    resources.container_id = Some(container.id.to_string());
+
     let downlod_options = DownloadFromContainerOptions {
-        path: static_app.directory.to_string(),
+        path: static_config.directory.to_string(),
     };
 
     let mut stream = docker.download_from_container(&container.id, Some(downlod_options));
     let mut tar_bytes = Vec::new();
 
     while let Some(chunk) = stream.next().await {
-        let data = chunk.expect("Error downloading file chunk");
+        let data = chunk.context("Error downloading file chunk")?;
         tar_bytes.extend_from_slice(&data);
     }
 
     let cursor = Cursor::new(tar_bytes);
     let mut archive = Archive::new(cursor);
 
-    archive.unpack(out_dir).expect("Failed to untar files");
+    archive.unpack(out_dir).context("Failed to untar files")?;
 
     let remove_options = RemoveContainerOptions {
         force: true, // Forces removal even if it's somehow stuck running
         ..Default::default()
     };
+
     docker
         .remove_container(&container.id, Some(remove_options))
         .await?;
+
+    // Resetting after removal so other failure won't try to remove already removed container
+    resources.container_id = None;
 
     Ok(())
 }

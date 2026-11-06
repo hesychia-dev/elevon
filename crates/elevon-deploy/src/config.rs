@@ -5,7 +5,7 @@ pub mod registry;
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use elevon_config::{ElevonConfig, ResolveEnvCredentials};
 use elevon_contracts::deploy::{AppRole, config::AppRoutingConfig};
 use serde::Deserialize;
@@ -35,7 +35,7 @@ pub struct Config {
 
     pub build: BuildConfig,
 
-    pub routing: AppRoutingConfig,
+    pub routing: Option<AppRoutingConfig>,
 
     pub env: Option<EnvConfig>,
 
@@ -104,6 +104,9 @@ impl Config {
         config_path: &str,
     ) -> Result<()> {
         let selected_apps = self.get_selected_apps(app_names)?;
+        for (_, app) in &selected_apps {
+            self.routing_for_deploy(&app.role)?;
+        }
         let build_args = BuildArgs {
             push: true,
             ..Default::default()
@@ -154,7 +157,23 @@ impl Config {
         Ok(())
     }
 
+    pub fn routing_for_deploy(&self, role: &AppRole) -> Result<Option<&AppRoutingConfig>> {
+        match role {
+            AppRole::Web => {
+                Ok(Some(self.routing.as_ref().context(
+                    "A web app requires project routing configuration",
+                )?))
+            }
+            AppRole::Worker => Ok(None),
+        }
+    }
+
     pub fn get_selected_apps(&self, arg_apps: &[String]) -> Result<Vec<(String, AppConfig)>> {
+        let tls = self
+            .routing
+            .as_ref()
+            .and_then(|routing| routing.tls.clone());
+
         if arg_apps.is_empty() {
             if !self.apps.is_empty() {
                 return Ok(self
@@ -164,7 +183,7 @@ impl Config {
                         (
                             k.clone(),
                             AppConfig {
-                                tls: self.routing.tls.clone(),
+                                tls: tls.clone(),
                                 ..v.clone()
                             },
                         )
@@ -175,7 +194,7 @@ impl Config {
                     "web".to_string(),
                     AppConfig {
                         role: AppRole::Web,
-                        tls: self.routing.tls.clone(),
+                        tls: tls.clone(),
                         ..Default::default()
                     },
                 )]);
@@ -192,7 +211,7 @@ impl Config {
                         (
                             name.clone(),
                             AppConfig {
-                                tls: self.routing.tls.clone(),
+                                tls: tls.clone(),
                                 ..cfg
                             },
                         )

@@ -12,7 +12,7 @@ use crate::{
         stream::ActionLogger,
     },
     cli::CliCommand,
-    image::drain_app,
+    deployment::drain_app,
     proxy::types::DrainAppData,
     socket::UnixClient,
 };

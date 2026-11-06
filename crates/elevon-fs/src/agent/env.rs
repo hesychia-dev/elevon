@@ -87,9 +87,24 @@ pub fn add_app_env(key: String, value: String, options: AppEnvOptions) -> Result
 }
 
 pub fn add_app_env_vars(vars: HashMap<String, String>, options: AppEnvOptions) -> Result<()> {
-    for (key, value) in vars {
-        add_app_env(key, value, options.clone())?;
-    }
+    let mut env = load_app_env(options.clone()).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to resolve env file path while loading env trying to update env, {}",
+            e
+        )
+    })?;
+
+    env.extend(vars.into_iter());
+
+    let path = get_app_env(options.clone()).with_context(|| {
+        format!(
+            "failed to resolve env file path while updating env, {:?}",
+            options
+        )
+    })?;
+
+    write_env_file(&path, &env)
+        .with_context(|| format!("failed to write env file {}", path.display()))?;
 
     Ok(())
 }

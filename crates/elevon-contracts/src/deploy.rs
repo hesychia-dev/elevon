@@ -47,6 +47,13 @@ impl StreamEvent {
             message: message.into(),
         }
     }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::Log {
+            level: StreamLogLevel::Error,
+            message: message.into(),
+        }
+    }
 }
 
 pub async fn log_stream_events<S>(mut event_stream: S) -> anyhow::Result<()>
@@ -116,9 +123,6 @@ pub enum AppRole {
     Worker,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct ParseAppRoleError;
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppRuntimeOptions {
@@ -140,7 +144,7 @@ pub struct AppPayload {
     pub runtime_options: AppRuntimeOptions,
     pub healthcheck: AppHealthCheckConfig,
     pub routing: Option<AppRoutingConfig>,
-    pub vars: Option<HashMap<String, String>>,
+    pub vars: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

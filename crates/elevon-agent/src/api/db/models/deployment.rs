@@ -22,7 +22,7 @@ pub struct Deployment {
     pub app_id: uuid::Uuid,
 
     #[index]
-    pub image_ref: Option<String>,
+    pub image_ref: String,
 
     #[index]
     pub container_id: Option<String>,
@@ -46,19 +46,16 @@ pub struct Deployment {
 }
 
 impl Deployment {
-    pub async fn create_deployment<'a>(
-        db: &mut toasty::Transaction<'a>,
-        app: &'a App,
-        payload: &'a AppPayload,
-        port: Option<u16>,
+    pub async fn create_deployment(
+        db: &mut toasty::Transaction<'_>,
+        app: &App,
+        payload: &AppPayload,
     ) -> Result<Self> {
-        let routing = payload.routing.as_ref().map(|r| DeploymentRouting {
-            port,
-            ..DeploymentRouting::from(r)
-        });
+        let routing = payload.routing.as_ref().map(DeploymentRouting::from);
 
         let deployment = Deployment::create()
             .app_id(app.id)
+            .image_ref(payload.image_ref.clone())
             .routing(routing)
             .exec(db)
             .await?;
@@ -68,6 +65,7 @@ impl Deployment {
         DeploymentOption::create()
             .deployment_id(deployment.id)
             .runtime(runtime_options)
+            .role(AppRoleDb::from(&payload.role))
             .exec(db)
             .await?;
 
