@@ -40,6 +40,7 @@ use crate::{
         stream::{StreamSender, emit},
     },
     proxy::types::{AgentEvent, DeployAppData, DrainAppData},
+    socket::Socket,
 };
 
 static ALLOCATED_PORTS: LazyLock<RwLock<HashSet<u16>>> =
@@ -48,11 +49,16 @@ static ALLOCATED_PORTS: LazyLock<RwLock<HashSet<u16>>> =
 pub struct DeploymentService {
     docker: Arc<bollard::Docker>,
     db: toasty::Db,
+    proxy_socket: Arc<Socket>,
 }
 
 impl DeploymentService {
-    pub fn new(docker: Arc<bollard::Docker>, db: toasty::Db) -> Self {
-        Self { docker, db }
+    pub fn new(docker: Arc<bollard::Docker>, db: toasty::Db, proxy_socket: Arc<Socket>) -> Self {
+        Self {
+            docker,
+            db,
+            proxy_socket,
+        }
     }
 
     pub async fn deploy(&self, tx: StreamSender, apps: Vec<AppPayload>) -> Result<()> {
@@ -228,7 +234,23 @@ async fn deploy_steps(
             .start_container(&container_id, None)
             .await
             .context("Failed to start container")?;
+    } else {
+        deployment
+            .update()
+            .status(DeploymentStatus::Active)
+            .exec(&mut service.db.clone())
+            .await?;
     }
+
+    if app_config.role == AppRole::Web {
+        send_upsert_route(service, action_state, deployment)
+            .await
+            .context("Failed to send upsert route request")?;
+    }
+
+    // TODO: Check health, persist container ID and host port, then activate before routing.
+    // TODO: Drain the previous deployment and prune old releases.
+    // TODO: Wire the new service and rollback; extend existing startup recovery.
 
     Ok(())
 }
@@ -272,6 +294,37 @@ async fn prepare_app_files(
     add_app_env_vars(app_vars, app_env_options)?;
 
     Ok(())
+}
+
+async fn send_upsert_route(
+    service: &DeploymentService,
+    action_state: &ActionState<'_>,
+    deployment: &Deployment,
+) -> Result<()> {
+    emit(
+        action_state.tx,
+        StreamEvent::log(format!(
+            "[{}] Updating proxy routing for traffic",
+            action_state.app_name
+        )),
+    )
+    .await;
+
+    let app_data = DeployAppData {
+        app_id: deployment.app_id.to_string(),
+        deployment_id: deployment.id.to_string(),
+        container_id: deployment.container_id.clone(),
+        status: DeploymentStatus::Active,
+        routing: deployment
+            .routing
+            .as_ref()
+            .map(|r| AppRoutingConfig::from(r)),
+    };
+
+    service
+        .proxy_socket
+        .send(AgentEvent::UpsertRoute(app_data.clone()))
+        .await
 }
 
 //

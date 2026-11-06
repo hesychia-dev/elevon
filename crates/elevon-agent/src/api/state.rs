@@ -50,7 +50,9 @@ impl ApiState {
         Ok(())
     }
 
-    // TODO: Fix it so it also returns non web app containers and puts them into `runtime`
+    // TODO: Reconcile workers without adding them to proxy routes.
+    // TODO: Reconcile pending deployments without container IDs, including orphaned containers.
+    // TODO: Check health before activating pending deployments and persist their active status.
     pub async fn get_running_route_containers(&self) -> Result<Vec<DeployAppData>> {
         let mut db = self.db.get();
 
