@@ -103,7 +103,7 @@ impl ProxyState {
                     );
 
                     for container in containers {
-                        self.upsert_route(container);
+                        self.upsert_route(container)?;
                     }
 
                     return Ok(());
@@ -119,22 +119,14 @@ impl ProxyState {
         anyhow::bail!("failed to load initial containers from API");
     }
 
-    pub fn upsert_route(&self, route: DeployAppData) {
-        let Some((domain, port)) = route
-            .routing
-            .as_ref()
-            .map(|r| (r.domain.clone(), r.resolved_port))
+    pub fn upsert_route(&self, route: DeployAppData) -> Result<()> {
+        let Some((domain, port)) = route.routing.as_ref().map(|r| (r.domain.clone(), r.port))
         else {
-            tracing::warn!(deployment = %&route.deployment_id, "refusing application route on non web app");
-            return;
+            anyhow::bail!("Refusing application route without routing configuration");
         };
 
         if domain == self.agent.domain {
-            tracing::warn!(
-                domain = %domain,
-                "refusing application route on reserved agent domain"
-            );
-            return;
+            anyhow::bail!("Refusing application route on reserved agent domain '{domain}'");
         }
 
         if route.status != DeploymentStatus::Active {
@@ -143,7 +135,7 @@ impl ProxyState {
                 status = ?route.status,
                 "skipping inactive application route"
             );
-            return;
+            anyhow::bail!("Refusing inactive application route");
         }
 
         self.routes.rcu(|current| {
@@ -170,51 +162,44 @@ impl ProxyState {
                 backends.push(route.clone());
             }
 
-            // Sorting routes based on paths, longest -> shortest
-            backends.sort_by(|a, b| {
-                let b_len = b
-                    .routing
-                    .as_ref()
-                    .and_then(|r| r.path_prefix.as_deref())
-                    .map_or(0, |p| p.len());
-                let a_len = a
-                    .routing
-                    .as_ref()
-                    .and_then(|r| r.path_prefix.as_deref())
-                    .map_or(0, |p| p.len());
-                b_len.cmp(&a_len)
-            });
+            sort_routes(backends);
 
             next
         });
 
         // Having no port means that its a static app so we don't need to touch LB
         let Some(port) = port else {
+            self.runtime.remove(&route.deployment_id);
             tracing::info!("Routes changed, current state: {:?}", self.routes.load());
-            return;
+            return Ok(());
         };
 
-        let routes = self.routes.load();
-        let backends = routes.get(&domain).cloned().unwrap_or_default();
+        let new_runtime = || {
+            Arc::new(BackendRuntime {
+                deployment_id: route.deployment_id.clone(),
+                container_id: route.container_id.clone(),
+                status: DeploymentStatus::Active,
+                route: Some(RouteBackendRuntime {
+                    port,
+                    inflight: Arc::new(AtomicUsize::new(0)),
+                    drain_started_at: None,
+                }),
+            })
+        };
 
-        let addrs: Vec<String> = backends
-            .iter()
-            .filter(|b| b.status == DeploymentStatus::Active)
-            .map(|_| format!("127.0.0.1:{}", port))
-            .collect();
+        self.runtime
+            .entry(route.deployment_id.clone())
+            .and_modify(|runtime| {
+                if runtime.status == DeploymentStatus::Drained {
+                    *runtime = new_runtime();
+                }
+            })
+            .or_insert_with(new_runtime);
 
-        let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(addrs).expect("valid backends");
-        lb.set_health_check(TcpHealthCheck::new());
-        lb.parallel_health_check = true;
-        let lb = Arc::new(lb);
-
-        self.lbs.rcu(|current| {
-            let mut next = (**current).clone();
-            next.insert(domain.clone(), lb.clone());
-            next
-        });
+        self.rebuild_load_balancer(domain);
 
         tracing::info!("Routes changed, current state: {:?}", self.routes.load());
+        Ok(())
     }
 
     pub fn drain_app(&self, app: DrainAppData) {
@@ -246,17 +231,12 @@ impl ProxyState {
             let inflight = self
                 .runtime
                 .get(&app.deployment_id)
-                .map(|r| {
-                    r.route
-                        .as_ref()
-                        .map(|ro| ro.inflight.load(std::sync::atomic::Ordering::Relaxed))
-                        .unwrap_or(0)
-                })
-                .unwrap_or(0);
+                .and_then(|r| r.route.as_ref().map(|route| route.inflight.clone()))
+                .unwrap_or_else(|| Arc::new(AtomicUsize::new(0)));
 
             let route_backend_runtime = RouteBackendRuntime {
                 port,
-                inflight: AtomicUsize::new(inflight),
+                inflight,
                 drain_started_at: Some(Instant::now()),
             };
 
@@ -321,7 +301,7 @@ impl ProxyState {
                         if inflight == 0 || past_grace {
                             runtime.container_id.clone()
                         } else {
-                            None
+                            return None;
                         }
                     }
                     None => runtime.container_id.clone(),
@@ -333,7 +313,9 @@ impl ProxyState {
     }
 
     pub fn remove_backend(&self, deployment_id: &str) {
-        let Some((_, _)) = self.runtime.remove(deployment_id) else {
+        let Some((_, _)) = self.runtime.remove_if(deployment_id, |_, runtime| {
+            runtime.status == DeploymentStatus::Drained
+        }) else {
             return;
         };
 
@@ -373,7 +355,7 @@ impl ProxyState {
             .into_iter()
             .flatten()
             .filter_map(|app| {
-                let port = app.routing.clone()?.resolved_port?;
+                let port = app.routing.as_ref()?.port?;
 
                 if app.status != DeploymentStatus::Active {
                     return None;
@@ -423,20 +405,14 @@ impl ProxyState {
         let guard = self.routes.load();
         let routes = guard.get(domain).context("Route not found")?;
 
-        let (app_id, deployment_id, static_app) =
+        let (app_id, deployment_id, remaineded_path, static_app) =
             find_static_app(routes, path).context("Static app not found")?;
 
         let static_dir = AgentPath::AppStaticDir(app_id, deployment_id);
 
-        let clean_path = static_app
-            .path
-            .as_deref()
-            .and_then(|p| path.strip_prefix(p))
-            .unwrap_or(path);
-
         let Some(file_path) = get_static_app_file(
             &static_dir,
-            clean_path,
+            &remaineded_path,
             &static_app.directory,
             &static_app.index,
         ) else {
@@ -451,32 +427,48 @@ impl ProxyState {
     }
 }
 
-fn find_based_on_path() {}
+/// Sorting routes based on paths - longest -> shortest
+fn sort_routes(routes: &mut Vec<DeployAppData>) {
+    routes.sort_by(|a, b| {
+        let b_len = b
+            .routing
+            .as_ref()
+            .and_then(|r| r.path_prefix.as_deref())
+            .map_or(0, |p| p.len());
+        let a_len = a
+            .routing
+            .as_ref()
+            .and_then(|r| r.path_prefix.as_deref())
+            .map_or(0, |p| p.len());
+        b_len.cmp(&a_len)
+    });
+}
 
 fn find_static_app<'a>(
     apps: &'a [DeployAppData],
     path: &'a str,
-) -> Option<(String, String, &'a StaticConfig)> {
+) -> Option<(String, String, String, &'a StaticConfig)> {
     apps.iter().find_map(|app| {
         if app.status != DeploymentStatus::Active {
             return None;
         }
-        let Some(routing) = app.routing else {
+
+        let routing = app.routing.as_ref()?;
+        let files = routing.static_files.as_ref()?;
+
+        let path_prefix = routing.path_prefix.as_deref().unwrap_or_default();
+        let remainder_path = path.strip_prefix(path_prefix)?;
+
+        if !remainder_path.starts_with("/") && !remainder_path.is_empty() {
             return None;
-        };
+        }
 
-        routing.static_files.as_ref().filter(|static_files| {})
-
-        // route.routing.as_ref().filter
-        //     .static_app
-        //     .as_ref()
-        //     .filter(|app| {
-        //         app.path.as_deref().is_none_or(|p| {
-        //             let rest = path.strip_prefix(p).unwrap_or(path);
-        //             rest.starts_with('/') || rest.starts_with('?')
-        //         })
-        //     })
-        //     .map(|s| (route.app_id.clone(), route.deployment_id.clone(), s))
+        Some((
+            app.app_id.to_string(),
+            app.deployment_id.to_string(),
+            remainder_path.to_string(),
+            files,
+        ))
     })
 }
 

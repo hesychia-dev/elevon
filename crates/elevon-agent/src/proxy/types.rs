@@ -1,6 +1,10 @@
-use std::{path::PathBuf, sync::atomic::AtomicUsize, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicUsize},
+    time::Instant,
+};
 
-use elevon_contracts::deploy::config::AppRoutingConfig;
+use elevon_contracts::deploy::config::AppRoutingPayload;
 use serde::{Deserialize, Serialize};
 
 use crate::api::db::models::DeploymentStatus;
@@ -18,9 +22,7 @@ pub struct DeployAppData {
     pub deployment_id: String,
     pub status: DeploymentStatus,
     pub container_id: Option<String>,
-    pub routing: Option<AppRoutingConfig>,
-    // pub web_app: Option<WebApp>,
-    // pub static_app: Option<StaticApp>,
+    pub routing: Option<AppRoutingPayload>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,7 +36,7 @@ pub struct DrainAppData {
 #[derive(Debug, Default)]
 pub struct RouteBackendRuntime {
     pub port: u16,
-    pub inflight: AtomicUsize,
+    pub inflight: Arc<AtomicUsize>,
     pub drain_started_at: Option<Instant>,
 }
 

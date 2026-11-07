@@ -9,7 +9,7 @@ use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 
-use crate::deploy::config::{AppHealthCheckConfig, AppRoutingConfig};
+use crate::deploy::config::{AppHealthCheckConfig, AppRoutingPayload};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -60,6 +60,9 @@ pub async fn log_stream_events<S>(mut event_stream: S) -> anyhow::Result<()>
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
 {
+    let mut buffer = Vec::new();
+    let mut done = false;
+
     while let Some(chunk_result) = event_stream.next().await {
         let chunk = match chunk_result {
             Ok(c) => c,
@@ -68,9 +71,11 @@ where
                 return Err(err.into());
             }
         };
-        let text = String::from_utf8_lossy(&chunk);
+        buffer.extend_from_slice(&chunk);
 
-        for line in text.lines() {
+        while let Some(end) = buffer.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = buffer.drain(..=end).collect();
+            let line = std::str::from_utf8(&line)?.trim_end_matches(['\r', '\n']);
             if line.trim().is_empty() {
                 continue;
             }
@@ -83,7 +88,7 @@ where
                 tracing::debug!("log_stream_events-data: {}", payload);
 
                 if payload == "[DONE]" {
-                    tracing::debug!("Stream sent [DONE] payload");
+                    done = true;
                     continue;
                 }
 
@@ -94,21 +99,21 @@ where
                         _ => tracing::error!(message),
                     },
                     Ok(StreamEvent::Error { message }) => {
-                        tracing_indicatif::indicatif_println!("\x1b[31m✗ {message}\x1b[0m");
+                        anyhow::bail!("{message}");
                     }
-                    Ok(other_event) => {
-                        tracing::debug!(?other_event, "Unhandled stream event variant");
+                    Ok(StreamEvent::Done) => {
+                        done = true;
                     }
                     Err(err) => {
-                        tracing::warn!(
-                            error = %err,
-                            raw_payload = payload,
-                            "Failed to parse SSE payload as StreamEvent"
-                        );
+                        return Err(err.into());
                     }
                 }
             }
         }
+    }
+
+    if !done {
+        anyhow::bail!("Stream ended before the operation completed");
     }
 
     Ok(())
@@ -143,7 +148,7 @@ pub struct AppPayload {
     pub role: AppRole,
     pub runtime_options: AppRuntimeOptions,
     pub healthcheck: AppHealthCheckConfig,
-    pub routing: Option<AppRoutingConfig>,
+    pub routing: Option<AppRoutingPayload>,
     pub vars: HashMap<String, String>,
 }
 
@@ -215,5 +220,53 @@ impl RegistryVars {
             username,
             password,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::FutureExt;
+
+    use super::*;
+
+    #[test]
+    fn stream_reports_errors_split_across_chunks() {
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![
+            Ok(Bytes::from_static(b"data: {\"type\":\"Err")),
+            Ok(Bytes::from_static(
+                b"or\",\"message\":\"deployment failed\"}\n\n",
+            )),
+        ];
+
+        let result = log_stream_events(futures_util::stream::iter(chunks))
+            .now_or_never()
+            .unwrap();
+
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("deployment failed")
+        );
+    }
+
+    #[test]
+    fn stream_requires_completion() {
+        let chunks: Vec<Result<Bytes, reqwest::Error>> =
+            vec![Ok(Bytes::from_static(b"data: {\"type\":\"Done\"}\n\n"))];
+        assert!(
+            log_stream_events(futures_util::stream::iter(chunks))
+                .now_or_never()
+                .unwrap()
+                .is_ok()
+        );
+
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![];
+        assert!(
+            log_stream_events(futures_util::stream::iter(chunks))
+                .now_or_never()
+                .unwrap()
+                .is_err()
+        );
     }
 }

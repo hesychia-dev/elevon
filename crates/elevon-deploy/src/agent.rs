@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use elevon_config::ResolveEnvCredentials;
 use elevon_contracts::deploy::{
     AppDeployPayload, AppPayload, AppRollback, AppRollbackPayload, AppRuntimeOptions,
-    config::AppRoutingConfig, log_stream_events,
+    config::AppRoutingPayload, log_stream_events,
 };
 use reqwest::{
     Client, Url,
@@ -156,10 +156,16 @@ pub fn prepare_apps_deploy_payload(
                 network: runtime_config.network,
             };
 
-            let app_routing = routing.map(|routing| AppRoutingConfig {
-                tls: tls_with_credentials,
-                ..routing.clone()
-            });
+            let app_routing = routing
+                .map(|routing| -> Result<AppRoutingPayload> {
+                    let routing = routing.resolved_credentials()?;
+
+                    Ok(AppRoutingPayload {
+                        tls: tls_with_credentials,
+                        ..AppRoutingPayload::try_from(&routing)?
+                    })
+                })
+                .transpose()?;
 
             Ok(Some(AppPayload {
                 image_ref: crate::image::util::image_reference(
@@ -215,7 +221,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use elevon_config::ElevonConfig;
-    use elevon_contracts::deploy::AppRole;
+    use elevon_contracts::deploy::{AppRole, config::AppRoutingConfig};
 
     use super::*;
 
@@ -362,7 +368,28 @@ mod tests {
             payload.apps[0].routing.as_ref().unwrap().domain,
             "example.com"
         );
+        assert_eq!(payload.apps[0].routing.as_ref().unwrap().port, Some(3000));
         assert!(payload.apps[1].routing.is_none());
+
+        unsafe {
+            std::env::set_var("ELEVON_TEST_ROUTING_PORT", "4321");
+        }
+        config.routing.as_mut().unwrap().port =
+            Some(elevon_contracts::deploy::config::PortConfig::Env(
+                "$ELEVON_TEST_ROUTING_PORT".to_string(),
+            ));
+        let web = config.get_selected_apps(&["web".to_string()])?;
+        let payload = prepare_apps_deploy_payload(
+            &config,
+            &registry,
+            web,
+            "templates/config.yml",
+            &config.build,
+        )?;
+        assert_eq!(payload.apps[0].routing.as_ref().unwrap().port, Some(4321));
+        unsafe {
+            std::env::remove_var("ELEVON_TEST_ROUTING_PORT");
+        }
 
         config.routing.as_mut().unwrap().static_files =
             Some(elevon_contracts::deploy::config::StaticConfig {

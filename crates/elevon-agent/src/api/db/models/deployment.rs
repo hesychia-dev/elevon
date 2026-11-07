@@ -4,7 +4,7 @@ use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
 use elevon_contracts::deploy::{
     AppPayload, AppRuntimeOptions,
-    config::{AppHealthCheckConfig, AppRoutingConfig, StaticConfig},
+    config::{AppHealthCheckConfig, AppRoutingPayload, StaticConfig},
 };
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
@@ -66,6 +66,7 @@ impl Deployment {
             .deployment_id(deployment.id)
             .runtime(runtime_options)
             .role(AppRoleDb::from(&payload.role))
+            .healthcheck(DeploymentHealthCheck::from(&payload.healthcheck))
             .exec(db)
             .await?;
 
@@ -143,26 +144,36 @@ pub struct DeploymentRouting {
     pub domain: String,
     pub path_prefix: Option<String>,
     pub port: Option<u16>,
+    pub container_port: Option<u16>,
     pub static_files: Option<DeploymentStaticWeb>,
 }
 
-impl From<&AppRoutingConfig> for DeploymentRouting {
-    fn from(value: &AppRoutingConfig) -> Self {
+impl DeploymentRouting {
+    pub fn container_payload(&self) -> AppRoutingPayload {
+        let mut routing = AppRoutingPayload::from(self);
+        routing.port = self.container_port;
+        routing
+    }
+}
+
+impl From<&AppRoutingPayload> for DeploymentRouting {
+    fn from(value: &AppRoutingPayload) -> Self {
         Self {
             domain: value.domain.clone(),
             path_prefix: value.path_prefix.clone(),
-            port: value.resolved_port,
+            port: None,
+            container_port: value.port,
             static_files: value.static_files.as_ref().map(DeploymentStaticWeb::from),
         }
     }
 }
 
-impl From<&DeploymentRouting> for AppRoutingConfig {
+impl From<&DeploymentRouting> for AppRoutingPayload {
     fn from(value: &DeploymentRouting) -> Self {
         Self {
             domain: value.domain.clone(),
             path_prefix: value.path_prefix.clone(),
-            resolved_port: value.port,
+            port: value.port,
             static_files: value.static_files.as_ref().map(StaticConfig::from),
             ..Default::default()
         }
@@ -342,5 +353,42 @@ impl From<&DeploymentHealthCheck> for AppHealthCheckConfig {
             required_successes: value.required_successes,
             path: value.path.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routing_keeps_container_and_host_ports_separate() {
+        let payload = AppRoutingPayload {
+            domain: "example.com".to_string(),
+            port: Some(3000),
+            ..Default::default()
+        };
+
+        let mut routing = DeploymentRouting::from(&payload);
+        assert_eq!(routing.container_port, Some(3000));
+        assert_eq!(routing.port, None);
+
+        routing.port = Some(3334);
+
+        assert_eq!(routing.container_payload().port, Some(3000));
+        assert_eq!(AppRoutingPayload::from(&routing).port, Some(3334));
+    }
+
+    #[test]
+    fn routing_does_not_guess_a_missing_container_port() {
+        let routing = DeploymentRouting {
+            domain: "example.com".to_string(),
+            path_prefix: None,
+            port: Some(3334),
+            container_port: None,
+            static_files: None,
+        };
+
+        assert_eq!(routing.container_payload().port, None);
+        assert_eq!(AppRoutingPayload::from(&routing).port, Some(3334));
     }
 }

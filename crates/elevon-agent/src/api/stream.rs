@@ -10,7 +10,7 @@ use axum::response::{
     Sse,
     sse::{Event, KeepAlive, KeepAliveStream},
 };
-use elevon_contracts::deploy::{StreamEvent, StreamLogLevel};
+use elevon_contracts::deploy::StreamEvent;
 use elevon_fs::agent::AgentPath;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
@@ -91,7 +91,13 @@ where
 
     tokio::spawn(async move {
         if let Err(err) = op(tx_for_task.clone()).await {
-            emit(&tx_for_task, StreamEvent::error(format!("{err:#}"))).await;
+            emit(
+                &tx_for_task,
+                StreamEvent::Error {
+                    message: format!("{err:#}"),
+                },
+            )
+            .await;
         }
 
         emit(&tx_for_task, StreamEvent::Done).await;
@@ -114,37 +120,5 @@ pub fn lock_action() -> anyhow::Result<std::fs::File> {
             anyhow::bail!("another deployment is already running")
         }
         Err(TryLockError::Error(err)) => Err(err.into()),
-    }
-}
-
-#[async_trait]
-pub trait OptionLoggerExt {
-    async fn log_event(&self, input: LogInput) -> Result<()>;
-}
-
-#[async_trait]
-impl OptionLoggerExt for Option<&(dyn ActionLogger + Send + Sync)> {
-    async fn log_event(&self, input: LogInput) -> Result<()> {
-        if let Some(logger) = self {
-            logger.log(input).await?;
-        } else {
-            let (level, msg) = match input {
-                LogInput::Event(event) => match event {
-                    StreamEvent::Log { level, message } => (Some(level), Some(message)),
-                    StreamEvent::Error { message } => (Some(StreamLogLevel::Error), Some(message)),
-                    _ => (None, None),
-                },
-                LogInput::Message(msg) => (Some(StreamLogLevel::Info), Some(msg)),
-            };
-
-            if let (Some(level), Some(msg)) = (level, msg) {
-                match level {
-                    StreamLogLevel::Info => tracing::info!(%msg),
-                    StreamLogLevel::Warn => tracing::warn!(%msg),
-                    StreamLogLevel::Error => tracing::error!(%msg),
-                }
-            }
-        }
-        Ok(())
     }
 }

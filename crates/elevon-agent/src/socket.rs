@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
-use tokio_util::codec::{Framed, FramedWrite, LengthDelimitedCodec};
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 pub enum SocketType {
     Proxy,
@@ -51,10 +51,16 @@ impl Socket {
         M: Serialize + Send + 'static,
     {
         let stream = UnixStream::connect(&self.path).await?;
-        let mut writer = FramedWrite::new(stream, LengthDelimitedCodec::new());
+        let mut connection = Framed::new(stream, LengthDelimitedCodec::new());
 
         let payload_bytes = serde_json::to_vec(&msg)?;
-        writer.send(bytes::Bytes::from(payload_bytes)).await?;
+        connection.send(bytes::Bytes::from(payload_bytes)).await?;
+
+        let response = tokio::time::timeout(std::time::Duration::from_secs(10), connection.next())
+            .await
+            .context("Timed out waiting for proxy acknowledgement")?
+            .context("Proxy closed the socket without acknowledging the request")??;
+        serde_json::from_slice::<()>(&response).context("Invalid proxy acknowledgement")?;
 
         Ok(())
     }
