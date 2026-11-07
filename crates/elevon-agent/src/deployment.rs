@@ -134,12 +134,10 @@ impl DeploymentService {
             .map(|routing| routing.container_payload());
 
         if role == AppRole::Web
-            && routing
-                .as_ref()
-                .is_some_and(|routing| {
-                    routing.static_files.is_none()
-                        && (routing.port.is_none() || routing.port == Some(0))
-                })
+            && routing.as_ref().is_some_and(|routing| {
+                routing.static_files.is_none()
+                    && (routing.port.is_none() || routing.port == Some(0))
+            })
         {
             bail!("Cannot roll back web deployment: original container port is unavailable");
         }
