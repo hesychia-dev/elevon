@@ -258,8 +258,8 @@ where
     let mut consecutive_successes = 0;
     let mut failures = 0;
 
-    // TODO: First check for path fails, I think due to the container not being ready
     loop {
+        let check_started_at = Instant::now();
         let result = tokio::time::timeout(timeout, check())
             .await
             .context("Health check timed out")
@@ -267,6 +267,7 @@ where
 
         match result {
             Ok(()) => {
+                failures = 0;
                 consecutive_successes += 1;
                 let since = stable_since.get_or_insert_with(Instant::now);
 
@@ -283,22 +284,22 @@ where
                 stable_since = None;
                 consecutive_successes = 0;
 
-                if start_time.elapsed() >= start_period {
+                if check_started_at.duration_since(start_time) >= start_period {
                     failures += 1;
-                }
 
-                logger
-                    .log(
-                        StreamEvent::warn(format!(
-                            "[{log_id}] Health check failed ({failures}/{}): {err:#}",
-                            healthcheck.retries
-                        ))
-                        .into(),
-                    )
-                    .await?;
+                    logger
+                        .log(
+                            StreamEvent::warn(format!(
+                                "[{log_id}] Health check failed ({failures}/{}): {err:#}",
+                                healthcheck.retries
+                            ))
+                            .into(),
+                        )
+                        .await?;
 
-                if failures >= healthcheck.retries {
-                    return Err(err.context("Container failed to pass health check"));
+                    if failures >= healthcheck.retries {
+                        return Err(err.context("Container failed to pass health check"));
+                    }
                 }
             }
         }

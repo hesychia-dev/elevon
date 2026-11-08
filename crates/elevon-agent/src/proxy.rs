@@ -98,9 +98,14 @@ impl ProxyHttp for Proxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        if !self.state.path_has_active_app(session).unwrap_or(false) {
+            not_found_response(session).await?;
+            return Ok(true);
+        }
+
         if let Ok(file_found) = self.state.handle_static_app_request(session).await {
             if !file_found {
-                let _ = not_found_response(session).await;
+                not_found_response(session).await?;
             }
             return Ok(true);
         }

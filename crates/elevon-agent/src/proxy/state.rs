@@ -16,6 +16,7 @@ use elevon_contracts::deploy::config::StaticConfig;
 use elevon_fs::agent::{AgentPath, get_static_app_file};
 use futures_util::StreamExt;
 use pingora::{
+    Error, ErrorType,
     http::ResponseHeader,
     lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin},
     proxy::Session,
@@ -389,6 +390,37 @@ impl ProxyState {
         });
     }
 
+    pub fn path_has_active_app(&self, session: &mut Session) -> Result<bool> {
+        let host = session
+            .req_header()
+            .headers
+            .get("Host")
+            .context("Host not found in headers")?;
+        let path = session.req_header().uri.path();
+
+        let domain = extract_domain(host).context("Domain not found")?;
+
+        let guard = self.routes.load();
+        let routes = guard.get(domain).context("Route not found")?;
+
+        Ok(routes.iter().any(|app| {
+            if app.status != DeploymentStatus::Active {
+                return false;
+            }
+
+            let Some(routing) = app.routing.as_ref() else {
+                return false;
+            };
+
+            let path_prefix = routing.path_prefix.as_deref().unwrap_or_default();
+            let Some(remainder) = path.strip_prefix(path_prefix) else {
+                return false;
+            };
+
+            remainder.is_empty() || remainder.starts_with('/')
+        }))
+    }
+
     /// Returning error means it's not a static app,
     /// returning false means - it's a static app but the file not found
     /// returning true means it's successful
@@ -425,6 +457,25 @@ impl ProxyState {
 
         Ok(true)
     }
+}
+
+pub async fn not_found_response(session: &mut Session) -> pingora::Result<()> {
+    let result: anyhow::Result<()> = async {
+        let mut header = ResponseHeader::build(404, Some(3))?;
+        header.insert_header("Content-Type", "text/plain")?;
+
+        session
+            .write_response_header(Box::new(header), false)
+            .await?;
+        session
+            .write_response_body(Some(Bytes::from("404 Not Found")), true)
+            .await?;
+
+        Ok(())
+    }
+    .await;
+
+    result.map_err(|err| Error::explain(ErrorType::HTTPStatus(500), err.to_string()))
 }
 
 /// Sorting routes based on paths - longest -> shortest
@@ -487,20 +538,6 @@ fn extract_domain(host: &HeaderValue) -> Option<&str> {
     }
 }
 
-pub async fn not_found_response(session: &mut Session) -> Result<()> {
-    let mut header = ResponseHeader::build(404, Some(3))?;
-    header.insert_header("Content-Type", "text/plain")?;
-
-    session
-        .write_response_header(Box::new(header), false)
-        .await?;
-    session
-        .write_response_body(Some(Bytes::from("404 Not Found")), true)
-        .await?;
-
-    Ok(())
-}
-
 async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> Result<()> {
     let file = File::open(&file_path).await?;
 
@@ -529,44 +566,54 @@ async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use elevon_contracts::deploy::config::AppRoutingPayload;
 
-    // #[test]
-    // fn test_find_static_app() {
-    //     let placeholder = "test";
+    #[test]
+    fn test_find_static_app() {
+        let placeholder = "test";
 
-    //     let app_1 = DeployAppData {
-    //         app_id: placeholder.to_string(),
-    //         deployment_id: placeholder.to_string(),
-    //         status: DeploymentStatus::Active,
-    //         static_app: Some(StaticApp {
-    //             domain: placeholder.to_string(),
-    //             directory: placeholder.to_string(),
-    //             index: placeholder.to_string(),
-    //             path: Some("/api/v1".to_string()),
-    //         }),
-    //         ..Default::default()
-    //     };
+        let app_1 = DeployAppData {
+            app_id: "app-1".to_string(),
+            deployment_id: "deployment-1".to_string(),
+            status: DeploymentStatus::Active,
+            routing: Some(AppRoutingPayload {
+                domain: placeholder.to_string(),
+                path_prefix: Some("/api/v1".to_string()),
+                static_files: Some(StaticConfig {
+                    directory: placeholder.to_string(),
+                    index: placeholder.to_string(),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
 
-    //     let app_2 = DeployAppData {
-    //         app_id: placeholder.to_string(),
-    //         deployment_id: placeholder.to_string(),
-    //         status: DeploymentStatus::Active,
-    //         static_app: Some(StaticApp {
-    //             domain: placeholder.to_string(),
-    //             directory: placeholder.to_string(),
-    //             index: placeholder.to_string(),
-    //             path: Some("/api".to_string()),
-    //         }),
-    //         ..Default::default()
-    //     };
+        let app_2 = DeployAppData {
+            app_id: "app-2".to_string(),
+            deployment_id: "deployment-2".to_string(),
+            status: DeploymentStatus::Active,
+            routing: Some(AppRoutingPayload {
+                domain: placeholder.to_string(),
+                path_prefix: Some("/api".to_string()),
+                static_files: Some(StaticConfig {
+                    directory: placeholder.to_string(),
+                    index: placeholder.to_string(),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
 
-    //     let mut routes: Vec<DeployAppData> = vec![app_1, app_2];
-    //     routes.sort_by(|a, b| b.);
+        let mut routes: Vec<DeployAppData> = vec![app_1, app_2];
+        sort_routes(&mut routes);
 
-    //     let selected_1 = find_static_app(&routes, "/api/v1/test");
+        let selected_1 = find_static_app(&routes, "/api/v1/test");
 
-    //     println!("selected: {:?}", selected_1);
-    // }
+        assert_eq!(
+            selected_1.map(|(_, deployment_id, _, _)| deployment_id),
+            Some("deployment-1".to_string())
+        );
+    }
 
     #[test]
     fn test_extract_domain() -> Result<()> {
