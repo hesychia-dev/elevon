@@ -1,0 +1,24 @@
+name: elevon-scripts
+image: hesychia-dev/elevon-scripts
+
+keep_releases: 1
+
+elevon:
+  agent:
+    url: $AGENT_URL
+    key: $AGENT_KEY
+
+registry:
+  username: $GHCR_USERNAME
+  password: $GHCR_PASSWORD
+
+routing:
+  domain: elevon.ccxlv.dev
+  path: /get
+  static:
+    directory: app
+  tls:
+    cert: $TLS_CERT
+    key: $TLS_KEY
+
+build: ../scripts

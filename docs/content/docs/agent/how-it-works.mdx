@@ -1,0 +1,144 @@
+---
+title: How it works
+description: How the Elevon agent routes traffic, runs deploys, and stores release state.
+icon: Workflow
+---
+
+<WelcomeLead>
+  The agent runs on the host as an API and a proxy. Callers reach the API through
+  the proxy on the agent domain. Your machine or CI has to be able to reach that
+  host, whether the path is public, private, or over a VPN.
+</WelcomeLead>
+
+## Secure the control plane
+
+The client sends deploy requests that include environment variables and other
+app-specific configuration. Protect that path somehow: HTTPS on the agent
+domain with [`tls`](/docs/agent/configuration#tls), a tunnel such as
+Cloudflare Tunnel in front of the agent, or another setup you trust on your
+network.
+
+On `elevon-agent install`, a default API key is created and printed once. Make
+sure to save it.
+
+## Pieces on the host
+
+<InfoGrid>
+  <InfoCard title="API" meta="control plane" icon="server" tone="accent">
+    Accepts authenticated deploy and admin requests, talks to Docker, writes
+    files, and owns the database.
+  </InfoCard>
+  <InfoCard title="Proxy" meta="Pingora" icon="network" tone="accent">
+    Built on [Pingora](https://github.com/cloudflare/pingora), with BoringSSL for
+    TLS. Routes by hostname, never talks to the database, and holds route state
+    in memory. The API pushes updates over a Unix socket at startup and after
+    each deploy.
+  </InfoCard>
+</InfoGrid>
+
+App, deployment, and auth state live in a local
+[Turso](https://turso.tech) database under the agent data directory.
+
+## What a deploy does
+
+The CLI posts a secured request with the project deploy configuration. The
+agent then:
+
+<FlowSteps note="Health checks and deploy payload shape are configured on the client. See the CLI docs for that.">
+  <FlowStep>
+    Pull the image from the registry unless it is already cached locally
+  </FlowStep>
+  <FlowStep>
+    Write this release's files on disk and record the deployment in the database
+  </FlowStep>
+  <FlowStep>
+    Start the release with its own env and TLS material for that version
+  </FlowStep>
+  <FlowStep>
+    For web apps, wait until the new release is healthy, then switch traffic
+  </FlowStep>
+  <FlowStep>
+    Drain the previous release, then prune anything past the keep limit
+  </FlowStep>
+</FlowSteps>
+
+After the switch, the old release stops taking new requests but stays up briefly
+so in-flight work can finish. That drain window is currently a fixed 30 seconds,
+then the container is stopped and removed.
+
+Env vars are not baked into the image at build time. The image is started with
+the env for that release so values are available at runtime only.
+
+Each deployment keeps its own copies of what it needs: environment files, TLS
+files, and related state. When the keep limit is exceeded, older releases are
+pruned: local images and files for those releases are removed.
+
+## Health before traffic
+
+For web apps, the proxy does not point at the new release until it is healthy.
+Health can come from container health, image health settings from the
+Dockerfile when present, or an HTTP path the agent probes on a web server.
+Exact configuration belongs in the client deploy config.
+
+## What you can run
+
+All of these still go through a Docker image build on the client. How the agent
+runs them differs.
+
+<InfoGrid>
+  <InfoCard title="Web apps" icon="network" tone="accent">
+    Long-running containers with a domain route. The proxy forwards requests to
+    the active container. Traffic moves over only after the new release is
+    healthy.
+  </InfoCard>
+  <InfoCard title="Workers" icon="workflow" tone="accent">
+    Long-running containers with no domain and no proxy route. Useful for
+    background jobs and other non-HTTP work.
+  </InfoCard>
+  <InfoCard title="Static apps" icon="files" tone="accent">
+    Still built as a Docker image so the agent can pull it and extract the
+    output files. No app container stays running afterward. The proxy serves
+    those files itself and streams responses.
+  </InfoCard>
+</InfoGrid>
+
+## Auth and local admin
+
+Remote calls need an API key, including the one created at install. On the host,
+`elevon-agent key` and `elevon-agent app` use the local Unix socket and do not
+need a key. From your laptop, use `elevon agent ...` against the agent URL with
+the key from your deploy config.
+
+```bash
+elevon-agent key create
+elevon-agent key list
+elevon-agent key revoke <id>
+elevon-agent key delete <id>
+```
+
+## Rollback
+
+Rollback brings back a previous **drained** release that is still within the
+keep window. The CLI selects it with `--app` or `--id`. The agent reactivates
+that release's files and routing, then drains the current one.
+
+If the previous env or static files are already pruned, or a drain is still in
+progress, rollback cannot proceed yet.
+
+## Operations
+
+```bash
+sudo elevon-agent upgrade
+sudo elevon-agent uninstall
+```
+
+Useful uninstall flags: `--keep-systemd`, `--keep-database`, `--keep-env-files`.
+
+<InfoGrid>
+  <InfoCard title="State" meta="/var/lib/elevon-agent" icon="folder">
+    Release files, env, TLS material, and the local database.
+  </InfoCard>
+  <InfoCard title="Sockets" meta="/run/elevon-agent" icon="server">
+    Unix sockets between the API, proxy, and local admin commands.
+  </InfoCard>
+</InfoGrid>

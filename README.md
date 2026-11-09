@@ -45,13 +45,13 @@ Install the agent on the target VM and the CLI on your development machine:
 ### Agent: system-wide installation
 
 ```bash
-curl -fsSL https://el.hesychia.dev/install-agent.sh | sudo bash
+curl -fsSL https://elevon.ccxlv.dev/get/agent.sh | sudo bash
 ```
 
 ### CLI: current-user installation
 
 ```bash
-curl -fsSL https://el.hesychia.dev/install-cli.sh | bash
+curl -fsSL https://elevon.ccxlv.dev/get/cli.sh | bash
 ```
 
 ## Configuration

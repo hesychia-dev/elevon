@@ -1,15 +1,16 @@
 agent:
   # Domain used by the agent
   domain: agent.example.com
-  port: 3333
-  # (Optional)
-  tls:
-    # Paths to certificate files
-    cert: ./cert.pem
-    key: ./key.pem
+  # Local API port the proxy dials. Defaults to 3333.
+  # port: 3333
 
 # proxy:
   # By default, the proxy runs on HTTP 80 and HTTPS 443.
   # A custom port HTTP:HTTPS where HTTPS is optional and HTTP is required if passed at all.
   # Without HTTPS port it doesn't run on HTTPS.
   # port: 6188:6189
+
+# tls:
+#   # Paths to certificate files
+#   cert: ./cert.pem
+#   key: ./key.pem

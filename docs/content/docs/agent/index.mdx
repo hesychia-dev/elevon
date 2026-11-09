@@ -1,0 +1,37 @@
+---
+title: Overview
+description: What the Elevon agent does and how to get started.
+icon: BookOpen
+---
+
+The agent is Elevon's half on the target Linux VM. It receives deploy requests
+from the CLI, pulls images, runs containers, routes traffic, and keeps release
+history so you can roll back.
+
+It runs as two services:
+
+<InfoGrid>
+  <InfoCard title="API" icon="server" tone="accent">
+    Listens on localhost and accepts authenticated deploy and admin requests.
+  </InfoCard>
+  <InfoCard title="Proxy" icon="network" tone="accent">
+    Listens on the public HTTP (and optional HTTPS) ports and routes traffic by
+    hostname.
+  </InfoCard>
+</InfoGrid>
+
+## Initialize
+
+Install the agent binary from [Installation](/docs/install) first.
+
+Then create the configuration file:
+
+```bash
+elevon-agent init
+```
+
+This writes `elevon-agent.yml` in the current directory. It fails if the file
+already exists.
+
+See [How it works](/docs/agent/how-it-works) for the runtime model, then
+[Configuration](/docs/agent/configuration) for `elevon-agent.yml`.

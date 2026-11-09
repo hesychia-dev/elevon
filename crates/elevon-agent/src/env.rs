@@ -8,7 +8,7 @@ use elevon_fs::agent::{
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
 
-use crate::config::{Config, ProxyConfig, parse_port};
+use crate::config::{AgentConfig, Config, ProxyConfig, parse_port};
 
 #[derive(Debug, Clone)]
 pub struct ElevonEnv {
@@ -42,7 +42,7 @@ impl ElevonEnv {
 
         let mut elevon_env = Self {
             agent_domain: Some(config.agent.domain.clone()),
-            agent_port: config.agent.port,
+            agent_port: config.agent.port.unwrap_or(AgentConfig::default_port()),
             proxy_http_port: proxy_ports.0,
             proxy_https_port: proxy_ports.1,
             turso_remote_url: config.turso_remote_url,
