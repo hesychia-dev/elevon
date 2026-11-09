@@ -27,10 +27,11 @@ use crate::{
     env::ElevonEnv,
     proxy::{
         socket::SocketControl,
-        state::{ProxyState, not_found_response},
+        state::{ProxyState, extract_domain, not_found_response},
     },
 };
 
+#[derive(Debug, Default)]
 pub struct RequestCtx {
     pub deployment_id: Option<String>,
 }
@@ -43,9 +44,7 @@ pub struct Proxy {
 impl ProxyHttp for Proxy {
     type CTX = RequestCtx;
     fn new_ctx(&self) -> Self::CTX {
-        RequestCtx {
-            deployment_id: None,
-        }
+        RequestCtx::default()
     }
 
     async fn upstream_peer(
@@ -54,14 +53,19 @@ impl ProxyHttp for Proxy {
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
         let host = session
-            .get_header("host")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("");
+            .req_header()
+            .headers
+            .get("Host")
+            .ok_or_else(|| Error::explain(ErrorType::HTTPStatus(502), "no Host header"))?;
 
-        if host == self.state.agent.domain {
+        let domain = extract_domain(host).ok_or_else(|| {
+            Error::explain(
+                ErrorType::HTTPStatus(502),
+                "could not get domain out of host",
+            )
+        })?;
+
+        if domain == self.state.agent.domain {
             let agent_addr = format!("127.0.0.1:{}", self.state.agent.port)
                 .parse()
                 .expect("agent route must have a valid address");
@@ -74,7 +78,7 @@ impl ProxyHttp for Proxy {
         }
 
         let lbs = self.state.lbs.load();
-        let Some(lb) = lbs.get(host) else {
+        let Some(lb) = lbs.get(domain) else {
             return Error::e_explain(ErrorType::HTTPStatus(404), "no route for host");
         };
 
@@ -97,10 +101,19 @@ impl ProxyHttp for Proxy {
         Ok(Box::new(HttpPeer::new(upstream, false, String::new())))
     }
 
-    async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+    async fn request_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> Result<bool, Box<pingora::Error>> {
+        if !self.state.path_has_active_app(session).unwrap_or(false) {
+            session.shutdown().await;
+            return Ok(true);
+        }
+
         if let Ok(file_found) = self.state.handle_static_app_request(session).await {
             if !file_found {
-                let _ = not_found_response(session).await;
+                not_found_response(session).await?;
             }
             return Ok(true);
         }

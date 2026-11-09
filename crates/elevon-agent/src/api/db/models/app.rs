@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use elevon_contracts::deploy::AppPayload;
+use elevon_contracts::deploy::{AppPayload, AppRole};
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 
@@ -45,15 +45,17 @@ impl App {
             .await?)
     }
 
-    pub async fn get_or_create(db: &mut toasty::Db, payload: &AppPayload) -> Result<Self> {
+    pub async fn get_or_create(
+        db: &mut toasty::Transaction<'_>,
+        payload: &AppPayload,
+    ) -> Result<Self> {
         let app = Self::get_by_name_and_project(db, &payload.name, &payload.project)
             .await
             .ok();
 
         if let Some(mut app) = app {
-            // TODO: There might be some edge case when changing the role,
-            // it wont get updated in here which could cause some issues
-            // Will need to be handled after adding unit and integration tests
+            // In case of an app being deployed 1+ times 'keep_release' might have changed so,
+            // we are updating it here.
             if app.keep_releases != payload.keep_releases {
                 app.update()
                     .keep_releases(payload.keep_releases)
@@ -108,6 +110,15 @@ impl App {
 pub enum AppRoleDb {
     Web,
     Worker,
+}
+
+impl From<&AppRole> for AppRoleDb {
+    fn from(value: &AppRole) -> Self {
+        match value {
+            AppRole::Web => Self::Web,
+            AppRole::Worker => Self::Worker,
+        }
+    }
 }
 
 #[derive(Clone, Tabled, Serialize, Deserialize)]

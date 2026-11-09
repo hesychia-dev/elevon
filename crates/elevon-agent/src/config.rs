@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use elevon_config::ElevonConfig;
-use elevon_contracts::deploy::{TlsConfig, TlsType};
+use elevon_contracts::deploy::{TlsType, config::TlsConfig};
 use elevon_fs::agent::{AppEnvOptions, tls::write_tls_file};
 use serde::{Deserialize, Deserializer};
 

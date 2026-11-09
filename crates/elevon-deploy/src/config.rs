@@ -5,9 +5,9 @@ pub mod registry;
 
 use std::collections::HashMap;
 
-use anyhow::Result;
-use elevon_config::{ConfigError, ElevonConfig, ResolveEnvCredentials, resolve_env_or_literal};
-use elevon_contracts::deploy::{AppRole, StaticApp, TlsConfig};
+use anyhow::{Context, Result};
+use elevon_config::{ElevonConfig, ResolveEnvCredentials};
+use elevon_contracts::deploy::{AppRole, config::AppRoutingConfig};
 use serde::Deserialize;
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
@@ -35,7 +35,7 @@ pub struct Config {
 
     pub build: BuildConfig,
 
-    pub routing: RoutingConfig,
+    pub routing: Option<AppRoutingConfig>,
 
     pub env: Option<EnvConfig>,
 
@@ -104,6 +104,9 @@ impl Config {
         config_path: &str,
     ) -> Result<()> {
         let selected_apps = self.get_selected_apps(app_names)?;
+        for (_, app) in &selected_apps {
+            self.routing_for_deploy(&app.role)?;
+        }
         let build_args = BuildArgs {
             push: true,
             ..Default::default()
@@ -154,7 +157,23 @@ impl Config {
         Ok(())
     }
 
+    pub fn routing_for_deploy(&self, role: &AppRole) -> Result<Option<&AppRoutingConfig>> {
+        match role {
+            AppRole::Web => {
+                Ok(Some(self.routing.as_ref().context(
+                    "A web app requires project routing configuration",
+                )?))
+            }
+            AppRole::Worker => Ok(None),
+        }
+    }
+
     pub fn get_selected_apps(&self, arg_apps: &[String]) -> Result<Vec<(String, AppConfig)>> {
+        let tls = self
+            .routing
+            .as_ref()
+            .and_then(|routing| routing.tls.clone());
+
         if arg_apps.is_empty() {
             if !self.apps.is_empty() {
                 return Ok(self
@@ -164,7 +183,7 @@ impl Config {
                         (
                             k.clone(),
                             AppConfig {
-                                tls: self.routing.tls.clone(),
+                                tls: tls.clone(),
                                 ..v.clone()
                             },
                         )
@@ -175,7 +194,7 @@ impl Config {
                     "web".to_string(),
                     AppConfig {
                         role: AppRole::Web,
-                        tls: self.routing.tls.clone(),
+                        tls: tls.clone(),
                         ..Default::default()
                     },
                 )]);
@@ -192,7 +211,7 @@ impl Config {
                         (
                             name.clone(),
                             AppConfig {
-                                tls: self.routing.tls.clone(),
+                                tls: tls.clone(),
                                 ..cfg
                             },
                         )
@@ -200,105 +219,6 @@ impl Config {
                     .ok_or_else(|| anyhow::anyhow!("unknown app `{name}`"))
             })
             .collect()
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum PortConfig {
-    Literal(u16),
-    Env(String),
-}
-
-impl Default for PortConfig {
-    fn default() -> Self {
-        Self::Literal(8000)
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct RoutingConfig {
-    pub domain: String,
-    pub port: Option<PortConfig>,
-    pub tls: Option<TlsConfig>,
-    #[serde(alias = "static")]
-    pub static_files: Option<StaticConfig>,
-}
-
-#[derive(Debug)]
-pub struct ResolvedRoutingConfig {
-    pub domain: String,
-    pub port: Option<u16>,
-    pub tls: Option<TlsConfig>,
-    pub static_files: Option<StaticConfig>,
-}
-
-impl ResolveEnvCredentials for RoutingConfig {
-    type Output = ResolvedRoutingConfig;
-
-    fn resolved_credentials(&self) -> Result<Self::Output, elevon_config::ConfigError> {
-        let port = self
-            .port
-            .as_ref()
-            .map(|port| -> Result<u16> {
-                match port {
-                    PortConfig::Literal(port) => Ok(*port),
-                    PortConfig::Env(key) => {
-                        let value =
-                            resolve_env_or_literal(key).map_err(|e| ConfigError::InvalidValue {
-                                field: "routing.port_env".to_string(),
-                                value: e.to_string(),
-                            })?;
-                        let port = value
-                            .parse::<u16>()
-                            .map_err(|_| ConfigError::InvalidValue {
-                                field: "routing.port".to_string(),
-                                value,
-                            })?;
-                        Ok(port)
-                    }
-                }
-            })
-            .transpose()
-            .map_err(|e| ConfigError::InvalidValue {
-                field: "routing.port".to_string(),
-                value: e.to_string(),
-            })?;
-
-        Ok(ResolvedRoutingConfig {
-            domain: self.domain.clone(),
-            port,
-            tls: self.tls.clone(),
-            static_files: self.static_files.clone(),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct StaticConfig {
-    pub dir: String,
-
-    /// Index file name that will be served as root
-    #[serde(default = "StaticConfig::default_index")]
-    pub index: String,
-
-    /// Domain path that the directory will be served at
-    pub path: Option<String>,
-}
-
-impl StaticConfig {
-    fn default_index() -> String {
-        "index.html".to_string()
-    }
-
-    pub fn to_static_app(&self, domain: String) -> StaticApp {
-        StaticApp {
-            domain,
-            directory: self.dir.clone(),
-            index: self.index.clone(),
-            path: self.path.clone(),
-        }
     }
 }
 

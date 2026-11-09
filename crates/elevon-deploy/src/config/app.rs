@@ -1,6 +1,9 @@
 use bollard::plugin::RestartPolicyNameEnum;
 use bytesize::ByteSize;
-use elevon_contracts::deploy::{AppHealthCheckConfig, AppRole, TlsConfig};
+use elevon_contracts::deploy::{
+    AppRole,
+    config::{AppHealthCheckConfig, TlsConfig},
+};
 use serde::{Deserialize, Deserializer};
 
 use crate::config::env::EnvConfig;

@@ -16,8 +16,9 @@ use crate::{
         state::SharedApiState,
         stream::{StreamResponse, lock_action, spawn_streaming_task},
     },
-    image::{deploy_apps, rollback_apps},
+    deployment::DeploymentService,
     proxy::types::DeployAppData,
+    socket::{Socket, SocketType},
 };
 
 pub fn router() -> Router<SharedApiState> {
@@ -38,7 +39,12 @@ async fn deploy(
 ) -> StreamResponse {
     spawn_streaming_task(move |tx| async move {
         let _lock_file = lock_action()?;
-        deploy_apps(&tx, state, payload).await
+        let service = DeploymentService::new(
+            std::sync::Arc::new(state.docker.clone()),
+            state.db.get(),
+            std::sync::Arc::new(Socket::new(SocketType::Proxy, false)?),
+        );
+        service.deploy(tx, payload.apps).await
     })
 }
 
@@ -57,7 +63,12 @@ async fn rollback(
 
     Ok(spawn_streaming_task(move |tx| async move {
         let _lock_file = lock_action()?;
-        rollback_apps(&tx, state, payload).await
+        let service = DeploymentService::new(
+            std::sync::Arc::new(state.docker.clone()),
+            state.db.get(),
+            std::sync::Arc::new(Socket::new(SocketType::Proxy, false)?),
+        );
+        service.rollback(tx, payload).await
     }))
 }
 

@@ -1,12 +1,15 @@
+pub mod config;
+
 use std::collections::HashMap;
 
 use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
 use bytes::Bytes;
-use elevon_config::{ConfigError, ResolveEnvCredentials, resolve_env_or_literal};
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
+
+use crate::deploy::config::{AppHealthCheckConfig, AppRoutingPayload};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -44,12 +47,22 @@ impl StreamEvent {
             message: message.into(),
         }
     }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::Log {
+            level: StreamLogLevel::Error,
+            message: message.into(),
+        }
+    }
 }
 
 pub async fn log_stream_events<S>(mut event_stream: S) -> anyhow::Result<()>
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
 {
+    let mut buffer = Vec::new();
+    let mut done = false;
+
     while let Some(chunk_result) = event_stream.next().await {
         let chunk = match chunk_result {
             Ok(c) => c,
@@ -58,9 +71,11 @@ where
                 return Err(err.into());
             }
         };
-        let text = String::from_utf8_lossy(&chunk);
+        buffer.extend_from_slice(&chunk);
 
-        for line in text.lines() {
+        while let Some(end) = buffer.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = buffer.drain(..=end).collect();
+            let line = std::str::from_utf8(&line)?.trim_end_matches(['\r', '\n']);
             if line.trim().is_empty() {
                 continue;
             }
@@ -73,7 +88,7 @@ where
                 tracing::debug!("log_stream_events-data: {}", payload);
 
                 if payload == "[DONE]" {
-                    tracing::debug!("Stream sent [DONE] payload");
+                    done = true;
                     continue;
                 }
 
@@ -84,21 +99,21 @@ where
                         _ => tracing::error!(message),
                     },
                     Ok(StreamEvent::Error { message }) => {
-                        tracing_indicatif::indicatif_println!("\x1b[31m✗ {message}\x1b[0m");
+                        anyhow::bail!("{message}");
                     }
-                    Ok(other_event) => {
-                        tracing::debug!(?other_event, "Unhandled stream event variant");
+                    Ok(StreamEvent::Done) => {
+                        done = true;
                     }
                     Err(err) => {
-                        tracing::warn!(
-                            error = %err,
-                            raw_payload = payload,
-                            "Failed to parse SSE payload as StreamEvent"
-                        );
+                        return Err(err.into());
                     }
                 }
             }
         }
+    }
+
+    if !done {
+        anyhow::bail!("Stream ended before the operation completed");
     }
 
     Ok(())
@@ -113,23 +128,6 @@ pub enum AppRole {
     Worker,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct ParseAppRoleError;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebApp {
-    pub port: u16,
-    pub domain: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StaticApp {
-    pub domain: String,
-    pub directory: String,
-    pub index: String,
-    pub path: Option<String>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppRuntimeOptions {
@@ -138,23 +136,6 @@ pub struct AppRuntimeOptions {
     pub memory_limit: Option<i64>,
     pub cpu_limit: Option<i64>,
     pub network: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TlsConfig {
-    pub cert: String,
-    pub key: String,
-}
-
-impl ResolveEnvCredentials for TlsConfig {
-    type Output = Self;
-
-    fn resolved_credentials(&self) -> Result<Self::Output, ConfigError> {
-        Ok(Self {
-            cert: resolve_env_or_literal(&self.cert)?,
-            key: resolve_env_or_literal(&self.key)?,
-        })
-    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -167,78 +148,13 @@ pub struct AppPayload {
     pub role: AppRole,
     pub runtime_options: AppRuntimeOptions,
     pub healthcheck: AppHealthCheckConfig,
-    pub vars: Option<HashMap<String, String>>,
-    pub tls: Option<TlsConfig>,
-    pub web_app: Option<WebApp>,
-    pub static_app: Option<StaticApp>,
+    pub routing: Option<AppRoutingPayload>,
+    pub vars: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppDeployPayload {
     pub apps: Vec<AppPayload>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppHealthCheckConfig {
-    #[serde(default = "AppHealthCheckConfig::default_start_period")]
-    pub start_period: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_interval")]
-    pub interval: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_timeout")]
-    pub timeout: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_retries")]
-    pub retries: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_stabilization")]
-    pub stabilization: u64,
-
-    #[serde(default = "AppHealthCheckConfig::default_required_successes")]
-    pub required_successes: u64,
-
-    pub path: Option<String>,
-}
-
-impl AppHealthCheckConfig {
-    pub fn default_start_period() -> u64 {
-        5
-    }
-
-    fn default_interval() -> u64 {
-        5
-    }
-
-    fn default_timeout() -> u64 {
-        30
-    }
-
-    fn default_retries() -> u64 {
-        3
-    }
-
-    fn default_stabilization() -> u64 {
-        5
-    }
-
-    fn default_required_successes() -> u64 {
-        1
-    }
-}
-
-impl Default for AppHealthCheckConfig {
-    fn default() -> Self {
-        Self {
-            start_period: AppHealthCheckConfig::default_start_period(),
-            interval: AppHealthCheckConfig::default_interval(),
-            timeout: AppHealthCheckConfig::default_timeout(),
-            retries: AppHealthCheckConfig::default_retries(),
-            stabilization: AppHealthCheckConfig::default_stabilization(),
-            required_successes: AppHealthCheckConfig::default_required_successes(),
-            path: None,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -304,5 +220,53 @@ impl RegistryVars {
             username,
             password,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::FutureExt;
+
+    use super::*;
+
+    #[test]
+    fn stream_reports_errors_split_across_chunks() {
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![
+            Ok(Bytes::from_static(b"data: {\"type\":\"Err")),
+            Ok(Bytes::from_static(
+                b"or\",\"message\":\"deployment failed\"}\n\n",
+            )),
+        ];
+
+        let result = log_stream_events(futures_util::stream::iter(chunks))
+            .now_or_never()
+            .unwrap();
+
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("deployment failed")
+        );
+    }
+
+    #[test]
+    fn stream_requires_completion() {
+        let chunks: Vec<Result<Bytes, reqwest::Error>> =
+            vec![Ok(Bytes::from_static(b"data: {\"type\":\"Done\"}\n\n"))];
+        assert!(
+            log_stream_events(futures_util::stream::iter(chunks))
+                .now_or_never()
+                .unwrap()
+                .is_ok()
+        );
+
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![];
+        assert!(
+            log_stream_events(futures_util::stream::iter(chunks))
+                .now_or_never()
+                .unwrap()
+                .is_err()
+        );
     }
 }

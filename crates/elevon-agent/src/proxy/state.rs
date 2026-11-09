@@ -10,11 +10,12 @@ use std::{
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use axum::http::HeaderValue;
-use bytes::Bytes;
 use dashmap::DashMap;
+use elevon_contracts::deploy::config::StaticConfig;
 use elevon_fs::agent::{AgentPath, get_static_app_file};
 use futures_util::StreamExt;
 use pingora::{
+    Error, ErrorType,
     http::ResponseHeader,
     lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin},
     proxy::Session,
@@ -102,7 +103,7 @@ impl ProxyState {
                     );
 
                     for container in containers {
-                        self.upsert_route(container);
+                        self.upsert_route(container)?;
                     }
 
                     return Ok(());
@@ -118,26 +119,14 @@ impl ProxyState {
         anyhow::bail!("failed to load initial containers from API");
     }
 
-    pub fn upsert_route(&self, route: DeployAppData) {
-        let (domain, port) = match &route.web_app {
-            Some(web_app) => (Some(web_app.domain.clone()), Some(web_app.port)),
-            None => match &route.static_app {
-                Some(static_app) => (Some(static_app.domain.clone()), None),
-                None => (None, None),
-            },
-        };
-
-        let Some(domain) = domain else {
-            tracing::warn!(deployment = %&route.deployment_id, "refusing application route on non web app");
-            return;
+    pub fn upsert_route(&self, route: DeployAppData) -> Result<()> {
+        let Some((domain, port)) = route.routing.as_ref().map(|r| (r.domain.clone(), r.port))
+        else {
+            anyhow::bail!("Refusing application route without routing configuration");
         };
 
         if domain == self.agent.domain {
-            tracing::warn!(
-                domain = %domain,
-                "refusing application route on reserved agent domain"
-            );
-            return;
+            anyhow::bail!("Refusing application route on reserved agent domain '{domain}'");
         }
 
         if route.status != DeploymentStatus::Active {
@@ -146,7 +135,7 @@ impl ProxyState {
                 status = ?route.status,
                 "skipping inactive application route"
             );
-            return;
+            anyhow::bail!("Refusing inactive application route");
         }
 
         self.routes.rcu(|current| {
@@ -173,36 +162,44 @@ impl ProxyState {
                 backends.push(route.clone());
             }
 
+            sort_routes(backends);
+
             next
         });
 
-        // Getting to this means that its a static app so we don't need to touch LB
+        // Having no port means that its a static app so we don't need to touch LB
         let Some(port) = port else {
+            self.runtime.remove(&route.deployment_id);
             tracing::info!("Routes changed, current state: {:?}", self.routes.load());
-            return;
+            return Ok(());
         };
 
-        let routes = self.routes.load();
-        let backends = routes.get(&domain).cloned().unwrap_or_default();
+        let new_runtime = || {
+            Arc::new(BackendRuntime {
+                deployment_id: route.deployment_id.clone(),
+                container_id: route.container_id.clone(),
+                status: DeploymentStatus::Active,
+                route: Some(RouteBackendRuntime {
+                    port,
+                    inflight: Arc::new(AtomicUsize::new(0)),
+                    drain_started_at: None,
+                }),
+            })
+        };
 
-        let addrs: Vec<String> = backends
-            .iter()
-            .filter(|b| b.status == DeploymentStatus::Active)
-            .map(|_| format!("127.0.0.1:{}", port))
-            .collect();
+        self.runtime
+            .entry(route.deployment_id.clone())
+            .and_modify(|runtime| {
+                if runtime.status == DeploymentStatus::Drained {
+                    *runtime = new_runtime();
+                }
+            })
+            .or_insert_with(new_runtime);
 
-        let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(addrs).expect("valid backends");
-        lb.set_health_check(TcpHealthCheck::new());
-        lb.parallel_health_check = true;
-        let lb = Arc::new(lb);
-
-        self.lbs.rcu(|current| {
-            let mut next = (**current).clone();
-            next.insert(domain.clone(), lb.clone());
-            next
-        });
+        self.rebuild_load_balancer(domain);
 
         tracing::info!("Routes changed, current state: {:?}", self.routes.load());
+        Ok(())
     }
 
     pub fn drain_app(&self, app: DrainAppData) {
@@ -234,17 +231,12 @@ impl ProxyState {
             let inflight = self
                 .runtime
                 .get(&app.deployment_id)
-                .map(|r| {
-                    r.route
-                        .as_ref()
-                        .map(|ro| ro.inflight.load(std::sync::atomic::Ordering::Relaxed))
-                        .unwrap_or(0)
-                })
-                .unwrap_or(0);
+                .and_then(|r| r.route.as_ref().map(|route| route.inflight.clone()))
+                .unwrap_or_else(|| Arc::new(AtomicUsize::new(0)));
 
             let route_backend_runtime = RouteBackendRuntime {
                 port,
-                inflight: AtomicUsize::new(inflight),
+                inflight,
                 drain_started_at: Some(Instant::now()),
             };
 
@@ -309,7 +301,7 @@ impl ProxyState {
                         if inflight == 0 || past_grace {
                             runtime.container_id.clone()
                         } else {
-                            None
+                            return None;
                         }
                     }
                     None => runtime.container_id.clone(),
@@ -321,7 +313,9 @@ impl ProxyState {
     }
 
     pub fn remove_backend(&self, deployment_id: &str) {
-        let Some((_, _)) = self.runtime.remove(deployment_id) else {
+        let Some((_, _)) = self.runtime.remove_if(deployment_id, |_, runtime| {
+            runtime.status == DeploymentStatus::Drained
+        }) else {
             return;
         };
 
@@ -332,7 +326,7 @@ impl ProxyState {
             .filter(|(_, routes)| {
                 routes
                     .iter()
-                    .any(|r| r.deployment_id == deployment_id && r.web_app.is_some())
+                    .any(|r| r.deployment_id == deployment_id && r.routing.is_some())
             })
             .map(|(domain, _)| domain.clone())
             .collect();
@@ -360,14 +354,14 @@ impl ProxyState {
             .get(&domain)
             .into_iter()
             .flatten()
-            .filter_map(|route| {
-                let web_app = route.web_app.clone()?;
+            .filter_map(|app| {
+                let port = app.routing.as_ref()?.port?;
 
-                if route.status != DeploymentStatus::Active {
+                if app.status != DeploymentStatus::Active {
                     return None;
                 }
 
-                Some(format!("127.0.0.1:{}", web_app.port))
+                Some(format!("127.0.0.1:{}", port))
             })
             .collect();
 
@@ -395,6 +389,42 @@ impl ProxyState {
         });
     }
 
+    pub fn path_has_active_app(&self, session: &mut Session) -> Result<bool> {
+        let host = session
+            .req_header()
+            .headers
+            .get("Host")
+            .context("Host not found in headers")?;
+
+        let domain = extract_domain(host).context("Domain not found")?;
+
+        if domain == self.agent.domain {
+            return Ok(true);
+        }
+
+        let path = session.req_header().uri.path();
+
+        let guard = self.routes.load();
+        let routes = guard.get(domain).context("Route not found")?;
+
+        Ok(routes.iter().any(|app| {
+            if app.status != DeploymentStatus::Active {
+                return false;
+            }
+
+            let Some(routing) = app.routing.as_ref() else {
+                return false;
+            };
+
+            let path_prefix = routing.path_prefix.as_deref().unwrap_or_default();
+            let Some(remainder) = path.strip_prefix(path_prefix) else {
+                return false;
+            };
+
+            remainder.is_empty() || remainder.starts_with('/')
+        }))
+    }
+
     /// Returning error means it's not a static app,
     /// returning false means - it's a static app but the file not found
     /// returning true means it's successful
@@ -411,25 +441,17 @@ impl ProxyState {
         let guard = self.routes.load();
         let routes = guard.get(domain).context("Route not found")?;
 
-        let (app_id, deployment_id, static_app) = routes
-            .iter()
-            .find_map(|route| {
-                if route.status != DeploymentStatus::Active {
-                    return None;
-                }
-                route
-                    .static_app
-                    .as_ref()
-                    .filter(|app| app.path.as_deref().is_none_or(|p| path.starts_with(p)))
-                    .map(|s| (route.app_id.clone(), route.deployment_id.clone(), s))
-            })
-            .context("Static app not found")?;
+        let (app_id, deployment_id, remaineded_path, static_app) =
+            find_static_app(routes, path).context("Static app not found")?;
 
         let static_dir = AgentPath::AppStaticDir(app_id, deployment_id);
 
-        let Some(file_path) =
-            get_static_app_file(&static_dir, path, &static_app.directory, &static_app.index)
-        else {
+        let Some(file_path) = get_static_app_file(
+            &static_dir,
+            &remaineded_path,
+            &static_app.directory,
+            &static_app.index,
+        ) else {
             return Ok(false);
         };
 
@@ -441,7 +463,22 @@ impl ProxyState {
     }
 }
 
-fn extract_domain(host: &HeaderValue) -> Option<&str> {
+pub async fn not_found_response(session: &mut Session) -> pingora::Result<()> {
+    let result: anyhow::Result<()> = async {
+        let header = ResponseHeader::build(404, Some(3))?;
+
+        session
+            .write_response_header(Box::new(header), false)
+            .await?;
+
+        Ok(())
+    }
+    .await;
+
+    result.map_err(|err| Error::explain(ErrorType::HTTPStatus(500), err.to_string()))
+}
+
+pub fn extract_domain(host: &HeaderValue) -> Option<&str> {
     let host_str = host.to_str().ok()?;
 
     let mut parts = host_str.rsplitn(2, ':');
@@ -456,18 +493,49 @@ fn extract_domain(host: &HeaderValue) -> Option<&str> {
     }
 }
 
-pub async fn not_found_response(session: &mut Session) -> Result<()> {
-    let mut header = ResponseHeader::build(404, Some(3))?;
-    header.insert_header("Content-Type", "text/plain")?;
+/// Sorting routes based on paths - longest -> shortest
+fn sort_routes(routes: &mut [DeployAppData]) {
+    routes.sort_by(|a, b| {
+        let b_len = b
+            .routing
+            .as_ref()
+            .and_then(|r| r.path_prefix.as_deref())
+            .map_or(0, |p| p.len());
+        let a_len = a
+            .routing
+            .as_ref()
+            .and_then(|r| r.path_prefix.as_deref())
+            .map_or(0, |p| p.len());
+        b_len.cmp(&a_len)
+    });
+}
 
-    session
-        .write_response_header(Box::new(header), false)
-        .await?;
-    session
-        .write_response_body(Some(Bytes::from("404 Not Found")), true)
-        .await?;
+fn find_static_app<'a>(
+    apps: &'a [DeployAppData],
+    path: &'a str,
+) -> Option<(String, String, String, &'a StaticConfig)> {
+    apps.iter().find_map(|app| {
+        if app.status != DeploymentStatus::Active {
+            return None;
+        }
 
-    Ok(())
+        let routing = app.routing.as_ref()?;
+        let files = routing.static_files.as_ref()?;
+
+        let path_prefix = routing.path_prefix.as_deref().unwrap_or_default();
+        let remainder_path = path.strip_prefix(path_prefix)?;
+
+        if !remainder_path.starts_with("/") && !remainder_path.is_empty() {
+            return None;
+        }
+
+        Some((
+            app.app_id.to_string(),
+            app.deployment_id.to_string(),
+            remainder_path.to_string(),
+            files,
+        ))
+    })
 }
 
 async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> Result<()> {
@@ -498,6 +566,54 @@ async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use elevon_contracts::deploy::config::AppRoutingPayload;
+
+    #[test]
+    fn test_find_static_app() {
+        let placeholder = "test";
+
+        let app_1 = DeployAppData {
+            app_id: "app-1".to_string(),
+            deployment_id: "deployment-1".to_string(),
+            status: DeploymentStatus::Active,
+            routing: Some(AppRoutingPayload {
+                domain: placeholder.to_string(),
+                path_prefix: Some("/api/v1".to_string()),
+                static_files: Some(StaticConfig {
+                    directory: placeholder.to_string(),
+                    index: placeholder.to_string(),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let app_2 = DeployAppData {
+            app_id: "app-2".to_string(),
+            deployment_id: "deployment-2".to_string(),
+            status: DeploymentStatus::Active,
+            routing: Some(AppRoutingPayload {
+                domain: placeholder.to_string(),
+                path_prefix: Some("/api".to_string()),
+                static_files: Some(StaticConfig {
+                    directory: placeholder.to_string(),
+                    index: placeholder.to_string(),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let mut routes: Vec<DeployAppData> = vec![app_1, app_2];
+        sort_routes(&mut routes);
+
+        let selected_1 = find_static_app(&routes, "/api/v1/test");
+
+        assert_eq!(
+            selected_1.map(|(_, deployment_id, _, _)| deployment_id),
+            Some("deployment-1".to_string())
+        );
+    }
 
     #[test]
     fn test_extract_domain() -> Result<()> {
