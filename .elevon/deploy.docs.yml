@@ -1,0 +1,24 @@
+name: elevon-docs
+image: hesychia-dev/elevon-docs
+
+keep_releases: 1
+
+elevon:
+  agent:
+    url: $AGENT_URL
+    key: $AGENT_KEY
+
+registry:
+  username: $GHCR_USERNAME
+  password: $GHCR_PASSWORD
+
+routing:
+  domain: elevon.ccxlv.dev
+  static:
+    dir: client
+    index: _shell.html
+  # tls:
+  #   cert: $TLS_CERT
+  #   key: $TLS_KEY
+
+build: ../docs
