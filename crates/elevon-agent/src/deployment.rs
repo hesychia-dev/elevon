@@ -447,8 +447,7 @@ async fn prepare_deployment(
     app_config: &AppPayload,
 ) -> Result<Deployment> {
     let app = App::get_or_create(db_tx, app_config).await?;
-
-    Ok(Deployment::create_deployment(db_tx, &app, app_config).await?)
+    Deployment::create_deployment(db_tx, &app, app_config).await
 }
 
 async fn activate_deployment(
@@ -474,15 +473,10 @@ async fn activate_deployment(
 
         resources.port = new_port;
 
-        let container_id = container::create_container(
-            action_state,
-            &deployment,
-            &app_config,
-            &app_vars,
-            new_port,
-        )
-        .await
-        .context("Failed to create container")?;
+        let container_id =
+            container::create_container(action_state, deployment, app_config, &app_vars, new_port)
+                .await
+                .context("Failed to create container")?;
 
         resources.container_id = Some(container_id.clone());
 
@@ -566,7 +560,7 @@ async fn prepare_app_files(
                 app_name,
                 deployment.app_id.to_string(),
                 deployment.id.to_string(),
-                &static_files,
+                static_files,
             )
             .await?;
 
@@ -599,10 +593,7 @@ async fn send_upsert_route(
         deployment_id: deployment.id.to_string(),
         container_id: deployment.container_id.clone(),
         status: DeploymentStatus::Active,
-        routing: deployment
-            .routing
-            .as_ref()
-            .map(|r| AppRoutingPayload::from(r)),
+        routing: deployment.routing.as_ref().map(AppRoutingPayload::from),
     };
 
     service

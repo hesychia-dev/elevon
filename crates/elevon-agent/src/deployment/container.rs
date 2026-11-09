@@ -32,7 +32,12 @@ pub(super) async fn pull_image(
     image_reference: &str,
     app_vars: &mut HashMap<String, String>,
 ) -> Result<()> {
-    if let Ok(_) = action_state.docker.inspect_image(image_reference).await {
+    if action_state
+        .docker
+        .inspect_image(image_reference)
+        .await
+        .is_ok()
+    {
         app_vars.remove(RegistryVars::KEY_SERVER);
         app_vars.remove(RegistryVars::KEY_USERNAME);
         app_vars.remove(RegistryVars::KEY_PASSWORD);

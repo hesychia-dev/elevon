@@ -104,7 +104,7 @@ impl ResolveEnvCredentials for AppRoutingConfig {
                 }
             })
             .transpose()?
-            .map(|p| PortConfig::Literal(p));
+            .map(PortConfig::Literal);
 
         Ok(Self {
             port,

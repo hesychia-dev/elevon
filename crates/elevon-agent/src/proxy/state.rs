@@ -494,7 +494,7 @@ pub fn extract_domain(host: &HeaderValue) -> Option<&str> {
 }
 
 /// Sorting routes based on paths - longest -> shortest
-fn sort_routes(routes: &mut Vec<DeployAppData>) {
+fn sort_routes(routes: &mut [DeployAppData]) {
     routes.sort_by(|a, b| {
         let b_len = b
             .routing

@@ -94,7 +94,7 @@ pub fn add_app_env_vars(vars: HashMap<String, String>, options: AppEnvOptions) -
         )
     })?;
 
-    env.extend(vars.into_iter());
+    env.extend(vars);
 
     let path = get_app_env(options.clone()).with_context(|| {
         format!(

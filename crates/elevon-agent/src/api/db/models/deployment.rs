@@ -241,7 +241,7 @@ impl TabledView for Deployment {
                 .as_ref()
                 .and_then(|r| r.port)
                 .map(|p| p.to_string())
-                .unwrap_or_else(|| Self::default_value()),
+                .unwrap_or_else(Self::default_value),
             status: self.status.to_string(),
             updated_at: self.updated_at.to_string(),
             created_at: self.created_at.to_string(),
