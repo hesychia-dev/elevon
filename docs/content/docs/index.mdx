@@ -1,31 +1,141 @@
 ---
-title: Hello World
-description: Your favourite docs framework.
-icon: Rocket
+title: Introduction
+description: Self-hosted deployments for containerized apps on your Linux VMs.
+icon: BookOpen
 ---
 
-Hey there! Fumadocs is the docs framework that also works on Tanstack Start!
+<WelcomeLead>
+  Elevon is a lightweight deployment platform for containerized apps on your
+  own Linux VMs. Build and push from your machine, then the agent runs the
+  release with a graceful handoff so traffic keeps flowing.
+</WelcomeLead>
 
-## Heading
+## Why Elevon
 
-Hello World!
+Managed platforms get expensive and complex fast. Full orchestration asks for
+more infrastructure than many teams need.
+
+<WhyList>
+  <WhyItem>
+    It is simple to understand, install, and use.
+  </WhyItem>
+  <WhyItem>
+    Production deploys stay fast, both to run and to set up.
+  </WhyItem>
+  <WhyItem>
+    It is a practical alternative to expensive managed platforms.
+  </WhyItem>
+  <WhyItem>
+    You can ship without a large platform or a dedicated ops team.
+  </WhyItem>
+  <WhyItem>
+    The day-to-day release workflow stays predictable.
+  </WhyItem>
+</WhyList>
+
+## How it works
+
+One command runs the full path.
+
+<FlowSteps note="Elevon keeps previous releases, so you can roll back when a deploy needs to come back down.">
+  <FlowStep>
+    CLI builds your container image locally or in CI
+  </FlowStep>
+  <FlowStep>
+    CLI pushes the image to your registry
+  </FlowStep>
+  <FlowStep>
+    CLI sends a secured request to the agent
+  </FlowStep>
+  <FlowStep>
+    Agent pulls the image, starts the new release, and shuts the old process
+    down gracefully
+  </FlowStep>
+</FlowSteps>
+
+## Components
+
+<InfoGrid>
+  <InfoCard title="CLI" meta="local · CI" icon="terminal">
+    Runs on your machine or in GitHub Actions to configure, build, publish, and
+    deploy.
+  </InfoCard>
+  <InfoCard title="Agent" meta="Linux host" icon="server">
+    Runs on the VM to pull releases, manage containers, route traffic, and keep
+    history.
+  </InfoCard>
+</InfoGrid>
+
+The CLI talks to the agent over authenticated API requests. Internal agent
+services talk over Unix sockets.
+
+## What you can run
+
+<InfoGrid>
+  <InfoCard title="Web apps" icon="network" tone="accent">
+    Domain routing, custom ports, with TLS or without.
+  </InfoCard>
+  <InfoCard title="Workers" icon="workflow" tone="accent">
+    Background containers with no domain routing.
+  </InfoCard>
+  <InfoCard title="Static apps" icon="files" tone="accent">
+    Just files, served from a built directory.
+  </InfoCard>
+  <InfoCard title="Multi-process" icon="container" tone="accent">
+    Several apps from one image when you need more than one role.
+  </InfoCard>
+</InfoGrid>
+
+## Who it is for
+
+Elevon fits people shipping containers to their own Linux VMs without a big
+managed platform or Kubernetes.
+
+<FitSplit>
+  <FitColumn title="Strong fit" tone="yes">
+    <FitItem>
+      You own or rent Linux VMs and want a simple deploy path
+    </FitItem>
+    <FitItem>
+      You care about fast releases and graceful handoffs
+    </FitItem>
+    <FitItem>
+      You want CLI and CI deploys without a heavy control plane
+    </FitItem>
+  </FitColumn>
+  <FitColumn title="Not a fit" tone="no">
+    <FitItem tone="no">
+      You need multi-node orchestration or Kubernetes features
+    </FitItem>
+    <FitItem tone="no">
+      You want a fully managed PaaS with no host of your own
+    </FitItem>
+  </FitColumn>
+</FitSplit>
+
+## Requirements
+
+<RequirementsPanel>
+  <Requirement piece="Agent host">
+    Linux <code>x86_64</code> VM with Docker
+  </Requirement>
+  <Requirement piece="CLI">
+    Linux <code>x86_64</code> or macOS <code>aarch64</code>
+  </Requirement>
+  <Requirement piece="CI">
+    GitHub Actions on Ubuntu runners
+  </Requirement>
+  <Requirement piece="Registry">
+    Push from CLI, pull from agent
+  </Requirement>
+  <Requirement piece="Network">
+    CLI or CI can reach the agent API
+  </Requirement>
+</RequirementsPanel>
+
+## Next steps
 
 <Cards>
-  <Card title="Learn more about Tanstack Start" href="https://tanstack.com/start" />
-  <Card title="Learn more about Fumadocs" href="https://fumadocs.dev" />
+  <Card title="Installation" href="/docs/install" description="Install the CLI and agent." />
+  <Card title="Agent" href="/docs/agent" description="Host config, routing, and how deploys run." />
 </Cards>
-
-### CodeBlock
-
-```ts
-console.log('Hello World');
-```
-
-#### Table
-
-| Head                            | Description                         |
-| ------------------------------- | ----------------------------------- |
-| `hello`                         | Hello World                         |
-| very **important**              | Hey                                 |
-| _Surprisingly_                  | Fumadocs                            |
-| very long text that looks weird | hello world hello world hello world |

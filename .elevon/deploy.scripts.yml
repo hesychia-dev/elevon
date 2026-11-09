@@ -17,9 +17,8 @@ routing:
   path: /get
   static:
     directory: app
-
-  # tls:
-  #   cert: $TLS_CERT
-  #   key: $TLS_KEY
+  tls:
+    cert: $TLS_CERT
+    key: $TLS_KEY
 
 build: ../scripts

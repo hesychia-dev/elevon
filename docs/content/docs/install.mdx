@@ -1,0 +1,48 @@
+---
+title: Installation
+description: Install the Elevon agent on your VM and the CLI on your machine.
+icon: Download
+---
+
+Install the agent on the target VM and the CLI on your development machine.
+
+<RequirementsPanel pieceLabel="Component" needLabel="Supported platforms">
+  <Requirement piece="CLI">
+    Linux <code>x86_64</code>, macOS <code>aarch64</code>
+  </Requirement>
+  <Requirement piece="Agent">
+    Linux <code>x86_64</code>
+  </Requirement>
+</RequirementsPanel>
+
+## CLI
+
+Current-user install on your laptop:
+
+```bash
+curl -fsSL https://elevon.ccxlv.dev/get/cli.sh | bash
+```
+
+Verify it works:
+
+```bash
+elevon --help
+```
+
+## Agent
+
+System-wide install on the VM:
+
+```bash
+curl -fsSL https://elevon.ccxlv.dev/get/agent.sh | sudo bash
+```
+
+Then initialize and install the service:
+
+```bash
+elevon-agent init
+sudo elevon-agent install --enable
+```
+
+See [How it works](/docs/agent/how-it-works) for the runtime model, then
+[Configuration](/docs/agent/configuration) for `elevon-agent.yml`.

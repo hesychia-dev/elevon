@@ -17,6 +17,8 @@ export const Route = createFileRoute("/og/docs/$")({
           title: page.data.title,
           description: page.data.description,
           site: appName,
+          primaryColor: "rgba(234, 179, 8, 0.4)",
+          primaryTextColor: "rgb(250, 204, 21)",
           format: "webp",
         });
       },

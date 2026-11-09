@@ -15,10 +15,10 @@ registry:
 routing:
   domain: elevon.ccxlv.dev
   static:
-    dir: client
+    directory: client
     index: _shell.html
-  # tls:
-  #   cert: $TLS_CERT
-  #   key: $TLS_KEY
+  tls:
+    cert: $TLS_CERT
+    key: $TLS_KEY
 
 build: ../docs

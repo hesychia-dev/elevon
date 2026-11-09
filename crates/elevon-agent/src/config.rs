@@ -7,8 +7,13 @@ use serde::{Deserialize, Deserializer};
 #[derive(Debug, Deserialize)]
 pub struct AgentConfig {
     pub domain: String,
-    pub port: u16,
-    pub tls: Option<TlsConfig>,
+    pub port: Option<u16>,
+}
+
+impl AgentConfig {
+    pub fn default_port() -> u16 {
+        3333
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,12 +69,13 @@ pub fn parse_port(ports: String) -> Result<(u16, Option<u16>)> {
 pub struct Config {
     pub agent: AgentConfig,
     pub proxy: Option<ProxyConfig>,
+    pub tls: Option<TlsConfig>,
     pub turso_remote_url: Option<String>,
 }
 
 impl Config {
     pub fn setup(&self) -> Result<()> {
-        if let Some(tls) = &self.agent.tls {
+        if let Some(tls) = &self.tls {
             let cert_bytes = std::fs::read(tls.cert.clone())?;
             let key_bytes = std::fs::read(tls.key.clone())?;
 

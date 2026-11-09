@@ -2,7 +2,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { staticFunctionMiddleware } from "@tanstack/start-static-server-functions";
 import { useFumadocsLoader } from "fumadocs-core/source/client";
-import { DocsLayout } from "fumadocs-ui/layouts/docs";
+import { DocsLayout } from "fumadocs-ui/layouts/spacious";
 import {
   DocsBody,
   DocsDescription,
@@ -10,12 +10,39 @@ import {
   DocsTitle,
   MarkdownCopyButton,
   ViewOptionsPopover,
-} from "fumadocs-ui/layouts/docs/page";
-import { Suspense, use } from "react";
+} from "fumadocs-ui/layouts/spacious/page";
+import { type ReactNode, Suspense, use } from "react";
 import { useMDXComponents } from "@/components/mdx";
 import { baseOptions } from "@/lib/layout.shared";
 import { getPageImageUrl, getPageMarkdownUrl, gitConfig } from "@/lib/shared";
 import { docs, source } from "@/lib/source";
+
+function renderInlineCode(text: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(/(`[^`]+`)/g)) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    nodes.push(
+      <code
+        key={`code-${match.index}`}
+        className="rounded-md border border-fd-border bg-fd-muted px-1.5 py-0.5 font-mono text-[0.8125rem] text-fd-foreground"
+      >
+        {match[1].slice(1, -1)}
+      </code>,
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+}
 
 export const Route = createFileRoute("/docs/$")({
   component: Page,
@@ -59,7 +86,9 @@ function Content({ path, markdownUrl }: { path: string; markdownUrl: string }) {
   return (
     <DocsPage toc={toc}>
       <DocsTitle>{page.title}</DocsTitle>
-      <DocsDescription>{page.description}</DocsDescription>
+      <DocsDescription>
+        {page.description ? renderInlineCode(page.description) : null}
+      </DocsDescription>
       <div className="flex flex-row gap-2 items-center border-b -mt-4 pb-6">
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover

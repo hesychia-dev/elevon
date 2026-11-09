@@ -2,7 +2,7 @@ FROM alpine:latest
 
 WORKDIR /app
 
-COPY ./install-agent.sh ./
-COPY ./install-cli.sh ./
+COPY ./agent.sh ./
+COPY ./cli.sh ./
 
 CMD ["sh"]

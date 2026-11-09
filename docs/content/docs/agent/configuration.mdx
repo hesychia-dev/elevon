@@ -1,0 +1,98 @@
+---
+title: Configuration
+description: "`elevon-agent.yml` fields for agent, proxy, and TLS."
+icon: Settings
+---
+
+Required defaults look like this:
+
+```yaml
+agent:
+  domain: agent.example.com
+```
+
+Everything else is optional. Create the file with `elevon-agent init` from the
+[Overview](/docs/agent).
+
+## Agent
+
+The `agent` block configures the control plane hostname and local API port.
+
+### `domain`
+
+Hostname reserved for the agent API. Point DNS here. Deployed apps cannot claim
+this domain.
+
+```yaml
+agent:
+  domain: agent.example.com
+```
+
+Public requests for this host go through the proxy to the local API.
+
+### `port` <span className="doc-optional">optional</span>
+
+Local port the proxy uses to reach the API on `127.0.0.1`. Keep this aligned
+with the API listen port. Defaults to `3333` when omitted.
+
+```yaml
+agent:
+  port: 3333
+```
+
+## Proxy <span className="doc-optional">optional</span>
+
+Omit this block to listen on `80:443`.
+
+### `port`
+
+`HTTP` or `HTTP:HTTPS`. HTTPS starts only when the second port is set, and
+needs [`tls`](#tls).
+
+```yaml
+proxy:
+  port: 6188:6189
+```
+
+```yaml
+proxy:
+  port: 6188
+```
+
+## TLS <span className="doc-optional">optional</span>
+
+Paths to PEM files the proxy uses for HTTPS on the agent domain. Set this when
+`proxy.port` includes HTTPS.
+
+These are filesystem paths read during `elevon-agent install`, not inline
+certificate content.
+
+```yaml
+tls:
+  cert: /etc/elevon/agent.crt
+  key: /etc/elevon/agent.key
+```
+
+| Field | Meaning |
+| --- | --- |
+| `cert` | Path to the certificate PEM file. |
+| `key` | Path to the private key PEM file. |
+
+App TLS is configured later in the deploy config, not here.
+
+## Full example
+
+A complete file with every block set:
+
+```yaml
+agent:
+  domain: agent.example.com
+  port: 3333
+
+proxy:
+  port: 6188:6189
+
+tls:
+  cert: /etc/elevon/agent.crt
+  key: /etc/elevon/agent.key
+```

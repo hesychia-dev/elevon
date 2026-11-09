@@ -1,0 +1,6 @@
+{
+  "title": "Agent",
+  "icon": "Server",
+  "defaultOpen": true,
+  "pages": ["index", "how-it-works", "configuration"]
+}

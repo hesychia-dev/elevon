@@ -7,12 +7,17 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!node_modules", "!.source"]
+    "includes": ["**", "!node_modules", "!.source", "!src/routeTree.gen.ts"]
   },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
     "indentWidth": 2
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
   },
   "assist": {
     "actions": {
