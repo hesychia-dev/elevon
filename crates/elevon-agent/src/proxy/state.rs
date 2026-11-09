@@ -10,7 +10,6 @@ use std::{
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use axum::http::HeaderValue;
-use bytes::Bytes;
 use dashmap::DashMap;
 use elevon_contracts::deploy::config::StaticConfig;
 use elevon_fs::agent::{AgentPath, get_static_app_file};
@@ -396,9 +395,14 @@ impl ProxyState {
             .headers
             .get("Host")
             .context("Host not found in headers")?;
-        let path = session.req_header().uri.path();
 
         let domain = extract_domain(host).context("Domain not found")?;
+
+        if domain == self.agent.domain {
+            return Ok(true);
+        }
+
+        let path = session.req_header().uri.path();
 
         let guard = self.routes.load();
         let routes = guard.get(domain).context("Route not found")?;
@@ -461,14 +465,10 @@ impl ProxyState {
 
 pub async fn not_found_response(session: &mut Session) -> pingora::Result<()> {
     let result: anyhow::Result<()> = async {
-        let mut header = ResponseHeader::build(404, Some(3))?;
-        header.insert_header("Content-Type", "text/plain")?;
+        let header = ResponseHeader::build(404, Some(3))?;
 
         session
             .write_response_header(Box::new(header), false)
-            .await?;
-        session
-            .write_response_body(Some(Bytes::from("404 Not Found")), true)
             .await?;
 
         Ok(())
@@ -476,6 +476,21 @@ pub async fn not_found_response(session: &mut Session) -> pingora::Result<()> {
     .await;
 
     result.map_err(|err| Error::explain(ErrorType::HTTPStatus(500), err.to_string()))
+}
+
+pub fn extract_domain(host: &HeaderValue) -> Option<&str> {
+    let host_str = host.to_str().ok()?;
+
+    let mut parts = host_str.rsplitn(2, ':');
+    let first_part = parts.next()?;
+
+    if let Some(domain_part) = parts.next() {
+        // If there was a colon, the second part yielded by rsplitn is the domain
+        Some(domain_part)
+    } else {
+        // If there was no colon, the whole string is the domain
+        Some(first_part)
+    }
 }
 
 /// Sorting routes based on paths - longest -> shortest
@@ -521,21 +536,6 @@ fn find_static_app<'a>(
             files,
         ))
     })
-}
-
-fn extract_domain(host: &HeaderValue) -> Option<&str> {
-    let host_str = host.to_str().ok()?;
-
-    let mut parts = host_str.rsplitn(2, ':');
-    let first_part = parts.next()?;
-
-    if let Some(domain_part) = parts.next() {
-        // If there was a colon, the second part yielded by rsplitn is the domain
-        Some(domain_part)
-    } else {
-        // If there was no colon, the whole string is the domain
-        Some(first_part)
-    }
 }
 
 async fn file_response(session: &mut Session, file_path: std::path::PathBuf) -> Result<()> {
