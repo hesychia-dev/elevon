@@ -19,6 +19,3 @@ RUN pnpm run build
 FROM scratch
 
 COPY --from=builder /app/dist/client /client
-
-
-
