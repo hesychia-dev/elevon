@@ -11,11 +11,19 @@ import {
   MarkdownCopyButton,
   ViewOptionsPopover,
 } from "fumadocs-ui/layouts/spacious/page";
-import { type ReactNode, Suspense, use } from "react";
+import { type ReactNode, Suspense, use, useEffect } from "react";
 import { useMDXComponents } from "@/components/mdx";
 import { baseOptions } from "@/lib/layout.shared";
 import { getPageImageUrl, getPageMarkdownUrl, gitConfig } from "@/lib/shared";
 import { docs, source } from "@/lib/source";
+
+function scrollToLocationHash() {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return;
+
+  const el = document.getElementById(decodeURIComponent(hash));
+  el?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 function renderInlineCode(text: string): ReactNode {
   const nodes: ReactNode[] = [];
@@ -82,6 +90,12 @@ function Content({ path, markdownUrl }: { path: string; markdownUrl: string }) {
 
   const { toc } = use(page.load());
   const MDX = page.body;
+
+  // Hash scroll runs before Suspense MDX mounts; retry once content is painted.
+  useEffect(() => {
+    if (!path) return;
+    scrollToLocationHash();
+  }, [path]);
 
   return (
     <DocsPage toc={toc}>

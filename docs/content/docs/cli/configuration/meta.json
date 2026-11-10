@@ -1,0 +1,6 @@
+{
+  "title": "Configuration",
+  "icon": "Settings",
+  "defaultOpen": true,
+  "pages": ["index", "elevon", "registry", "routing", "build", "env", "apps"]
+}

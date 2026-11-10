@@ -1,5 +1,12 @@
 import { Link } from "@tanstack/react-router";
-import { BookOpen, Container, Server } from "lucide-react";
+import {
+  BookOpen,
+  Container,
+  GitBranch,
+  Rocket,
+  Server,
+  Terminal,
+} from "lucide-react";
 
 export function DocsLinks() {
   const links = [
@@ -21,6 +28,24 @@ export function DocsLinks() {
       body: "Host daemon config, routing, deploys, and operations.",
       icon: Server,
     },
+    {
+      href: "cli",
+      title: "CLI",
+      body: "Deploy config, build, push, and ship releases.",
+      icon: Terminal,
+    },
+    {
+      href: "deploy",
+      title: "First deploy",
+      body: "From empty host to a live release.",
+      icon: Rocket,
+    },
+    {
+      href: "ci",
+      title: "GitHub Actions",
+      body: "Run elevon deploy from CI.",
+      icon: GitBranch,
+    },
   ] as const;
 
   return (
@@ -33,7 +58,7 @@ export function DocsLinks() {
           Guides and references for shipping with Elevon.
         </p>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {links.map((item) => {
             const Icon = item.icon;
             return (

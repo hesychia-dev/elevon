@@ -1,0 +1,75 @@
+---
+title: First deploy
+description: Take a containerized app from install to a live release.
+icon: Rocket
+---
+
+<WelcomeLead>
+  This walkthrough gets one web app onto a Linux VM: install both sides, fill
+  a deploy config, then ship a release.
+</WelcomeLead>
+
+## Before you start
+
+You need:
+
+- A Linux `x86_64` VM with Docker
+- A container registry you can push to
+- DNS you can point at the VM (agent domain and app domain)
+- CLI on your laptop from [Installation](/docs/install)
+
+## 1. Set up the agent
+
+Install the CLI and agent from [Installation](/docs/install).
+
+Edit `elevon-agent.yml` and set at least the agent domain:
+
+```yaml
+agent:
+  domain: agent.example.com
+```
+
+Point DNS for that hostname at the VM, then finish with
+`sudo elevon-agent install --enable` if the services are not running yet. Save
+the API key printed at install — you will need it as `AGENT_KEY`.
+
+See [Agent configuration](/docs/agent/configuration) for proxy ports and TLS.
+
+## 2. Create a deploy config
+
+On your machine, create and fill a deploy config from the [CLI](/docs/cli)
+docs. Point the app domain DNS at the same VM.
+
+## 3. Export credentials
+
+In your shell (or CI secrets — see [GitHub Actions](/docs/ci)):
+
+```bash
+export AGENT_URL=https://agent.example.com
+export AGENT_KEY=...          # from elevon-agent install
+export GHCR_USERNAME=...
+export GHCR_PASSWORD=...      # registry token with push + pull
+```
+
+`AGENT_URL` is the public agent hostname the CLI can reach. The agent must be
+able to pull the same image you push.
+
+## 4. Ship it
+
+```bash
+elevon check
+elevon deploy
+```
+
+`check` resolves config and credentials. `deploy` builds, pushes, and asks the
+agent to run the release.
+
+When it finishes, open `https://app.example.com` (or HTTP if you have not set
+app TLS yet).
+
+## Next
+
+- [How the CLI works](/docs/cli/how-it-works) for the client path
+- [How the agent works](/docs/agent/how-it-works) for pull, health, and drain
+- [GitHub Actions](/docs/ci) to run the same deploy from CI
+- [Rollback](/docs/cli/how-it-works#rollback) when you need a previous release

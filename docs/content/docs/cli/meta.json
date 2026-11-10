@@ -1,0 +1,6 @@
+{
+  "title": "CLI",
+  "icon": "Terminal",
+  "defaultOpen": true,
+  "pages": ["index", "how-it-works", "commands", "configuration"]
+}

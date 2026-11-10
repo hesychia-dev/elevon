@@ -1,0 +1,81 @@
+---
+title: Commands
+description: elevon command reference.
+icon: SquareTerminal
+---
+
+Global flags on every command:
+
+| Flag | Meaning |
+| --- | --- |
+| `-c` / `--config` | Path to the deploy file (default `.elevon/deploy.yml`) |
+| `-p` / `--project` | Use `.elevon/deploy.<name>.yml` |
+
+`-c` and `-p` conflict; use one.
+
+## `elevon init`
+
+Write `.elevon/deploy.yml` from the template.
+
+## `elevon check`
+
+Load the deploy config and resolve agent and registry credentials. Logs success
+when that works. It does not verify Docker, the Dockerfile, or registry
+reachability.
+
+## `elevon build`
+
+Build the image from the deploy config.
+
+| Flag | Meaning |
+| --- | --- |
+| `-P` / `--push` | Push after a successful build |
+| `--no-cache` | Build without cache |
+
+## `elevon push`
+
+Push the configured image to the registry.
+
+## `elevon deploy`
+
+Build with push, then send the deploy request to the agent.
+
+| Flag | Meaning |
+| --- | --- |
+| `--app <NAME>` | Limit to one or more apps (repeatable / list) |
+
+## `elevon rollback`
+
+Roll back to a previous **drained** release (not pruned). You must pass at least
+one target. See [How it works](/docs/cli/how-it-works#rollback).
+
+| Flag | Meaning |
+| --- | --- |
+| `--app <APP> [<APP>]` | Roll back those apps |
+| `--id <ID> [<ID>]` | Roll back specific drained deployment IDs |
+
+## `elevon upgrade`
+
+Replace the local `elevon` binary.
+
+| Flag | Meaning |
+| --- | --- |
+| `--version <VER>` | Version to install (default latest) |
+
+## `elevon agent`
+
+Remote admin against the agent URL and key from the deploy config.
+
+```bash
+elevon agent key create [NAME]
+elevon agent key list
+elevon agent key revoke <ID> [<ID>]
+elevon agent key delete <ID> [<ID>]
+
+elevon agent app list
+elevon agent app deployment list
+elevon agent app stop <APP> [<APP>]
+```
+
+`key delete` accepts `-y` / `--yes` to skip confirmation. `app stop` accepts
+`-f` / `--force`.

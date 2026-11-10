@@ -1,0 +1,60 @@
+---
+title: Apps
+description: Multi-process app roles in deploy.yml.
+icon: Container
+---
+
+<span className="doc-optional">optional</span>
+
+If `apps:` is omitted, Elevon creates a single app named `web` using the
+project routing and image.
+
+```yaml
+apps:
+  api:
+    role: web
+    healthcheck:
+      path: /health
+  worker:
+    role: worker
+    cmd: "deno run worker.ts"
+    runtime:
+      restart: unless-stopped
+      cpu: 2
+      memory: 512mb
+```
+
+| Field | Meaning |
+| --- | --- |
+| `role` <span className="doc-optional">optional</span> | `web` (default) or `worker` |
+| `cmd` <span className="doc-optional">optional</span> | Override the container command |
+| `env` <span className="doc-optional">optional</span> | Per-app env (same shape as project [Env](/docs/cli/configuration/env)) |
+| `runtime` <span className="doc-optional">optional</span> | Restart policy, CPU, memory, network |
+| `healthcheck` <span className="doc-optional">optional</span> | Deploy-time health settings |
+
+### `runtime`
+
+| Field | Meaning |
+| --- | --- |
+| `restart` <span className="doc-optional">optional</span> | Defaults to `unless-stopped` |
+| `cpu` <span className="doc-optional">optional</span> | CPU cores as a number (`2`, `1.5`) |
+| `memory` <span className="doc-optional">optional</span> | Size string (`512mb`, `1gb`) or integer bytes |
+| `network` <span className="doc-optional">optional</span> | Docker network name (string) |
+
+### `healthcheck`
+
+Used while the agent waits for a web release before switching traffic. Exact
+tuning is optional; defaults exist for timing fields.
+
+| Field | Meaning |
+| --- | --- |
+| `path` <span className="doc-optional">optional</span> | HTTP path to probe in addition to container health |
+| `start_period` <span className="doc-optional">optional</span> | Grace period after start (seconds). Default `5`. |
+| `interval` <span className="doc-optional">optional</span> | Seconds between checks. Default `5`. |
+| `timeout` <span className="doc-optional">optional</span> | Per-check timeout. Default `30`. |
+| `retries` <span className="doc-optional">optional</span> | Failures allowed after the start period. Default `3`. |
+| `stabilization` <span className="doc-optional">optional</span> | Seconds of success before healthy. Default `5`. |
+| `required_successes` <span className="doc-optional">optional</span> | Consecutive successes required. Default `1`. |
+
+Workers do not use domain routing. Web apps need project
+[Routing](/docs/cli/configuration/routing) unless every selected app is a worker.
