@@ -2,6 +2,13 @@ name: Deploy scripts
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/**"
+      - ".elevon/deploy.scripts.yml"
+      - ".github/workflows/deploy-scripts.yml"
 
 jobs:
   deploy:
