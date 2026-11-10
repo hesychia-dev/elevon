@@ -9,7 +9,13 @@ It is designed for teams that want a simple, self-hosted deployment workflow
 without adopting a large managed platform or operating a full container
 orchestration system.
 
-**Docs:** [elevon.ccxlv.dev](https://elevon.ccxlv.dev)
+
+<div align="center">
+
+[Documentation](https://elevon.ccxlv.dev)
+
+</div>
+
 
 ## What It Is
 

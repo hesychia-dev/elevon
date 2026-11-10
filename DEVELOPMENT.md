@@ -18,7 +18,7 @@ The main crates are:
 ```bash
 cargo check --workspace
 cargo test --workspace
-bash -n scripts/agent.sh scripts/cli.sh scripts/resolve-release-archive.sh
+bash -n scripts/install-agent.sh scripts/install-cli.sh scripts/resolve-release-archive.sh
 ```
 
 Automated tests are still limited. Beta validation also requires manually
