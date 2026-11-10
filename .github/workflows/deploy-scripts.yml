@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy scripts
 
 on:
   workflow_dispatch:
@@ -20,4 +20,4 @@ jobs:
           GHCR_PASSWORD: ${{ secrets.GHCR_PASSWORD }}
           TLS_CERT: ${{ secrets.TLS_CERT }}
           TLS_KEY: ${{ secrets.TLS_KEY }}
-        run: elevon deploy
+        run: elevon deploy -p scripts
