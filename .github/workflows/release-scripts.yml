@@ -1,0 +1,23 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Elevon
+        uses: hesychia-dev/setup-elevon@v1
+
+      - name: Deploy
+        env:
+          AGENT_URL: ${{ secrets.AGENT_URL }}
+          AGENT_KEY: ${{ secrets.AGENT_KEY }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_PASSWORD: ${{ secrets.GHCR_PASSWORD }}
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_KEY: ${{ secrets.TLS_KEY }}
+        run: elevon deploy
