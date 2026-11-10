@@ -28,8 +28,10 @@ build:
 
 If `build` is omitted entirely, the context defaults to `.`.
 
-Elevon respects `.gitignore` and `.dockerignore` when collecting the build
-context, so changes to ignored files do not force a new image rebuild. Put
-those files in the same directory as the Dockerfile (the build context).
-
-Outside a git repository, the image is rebuilt on every run.
+<Callout title="Image tags">
+  Elevon tags images from a content hash of files in the build context. It
+  applies `.dockerignore` and `.gitignore` next to the Dockerfile when
+  collecting those files; git is not required. Changes outside the context do
+  not change the tag. If that tag already exists in the registry, the build is
+  skipped. Force a rebuild with `elevon build --no-cache`.
+</Callout>
