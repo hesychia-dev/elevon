@@ -9,6 +9,8 @@ It is designed for teams that want a simple, self-hosted deployment workflow
 without adopting a large managed platform or operating a full container
 orchestration system.
 
+**Docs:** [elevon.ccxlv.dev](https://elevon.ccxlv.dev)
+
 ## What It Is
 
 Elevon has two components:
@@ -35,12 +37,8 @@ agent uses Unix sockets for communication between its internal services.
 
 ## Installation
 
-Install the agent on the target VM and the CLI on your development machine:
-
-| Component | Supported platforms             |
-| --------- | ------------------------------- |
-| CLI       | Linux `x86_64`, macOS `aarch64` |
-| Agent     | Linux `x86_64`                  |
+See the [Installation](https://elevon.ccxlv.dev/docs/install) guide for
+supported platforms and full setup.
 
 ### Agent: system-wide installation
 
@@ -56,69 +54,17 @@ curl -fsSL https://elevon.ccxlv.dev/get/cli.sh | bash
 
 ## Configuration
 
-A deployment configuration describes the application image, registry,
-routing, build context, environment, and app-specific settings:
-
-```yaml
-name: elevon
-image: hesychia-dev/elevon
-
-elevon:
-  agent:
-    url: $AGENT_URL
-    key: $AGENT_KEY
-
-registry:
-  username: $GHCR_USERNAME
-  password: $GHCR_PASSWORD
-
-routing:
-  domain: el.hesychia.dev
-  port: $PORT
-  tls:
-    cert: $TLS_CERT
-    key: $TLS_KEY
-
-build: ../
-
-env:
-  inherit:
-    - PORT
-```
-
-Use [`crates/elevon-deploy/templates/config.yml`](crates/elevon-deploy/templates/config.yml)
-as the full template, including comments about defaults and environment
-variable expansion.
+[CLI configuration](https://elevon.ccxlv.dev/docs/cli/configuration) and
+[Agent configuration](https://elevon.ccxlv.dev/docs/agent/configuration).
 
 ## CLI
 
-Initialize and deploy an application with:
-
-```bash
-elevon init
-elevon check
-elevon deploy
-elevon rollback
-```
-
-The CLI uses `.elevon/deploy.yml` by default. Run `elevon --help` for the
-complete command reference.
-
-Manage the agent separately on the target VM:
-
-```bash
-elevon-agent init
-sudo elevon-agent install --enable
-elevon-agent key --help
-sudo elevon-agent uninstall
-```
-
-See the installation and configuration sections above for setup details.
+See the [CLI](https://elevon.ccxlv.dev/docs/cli) and
+[Agent](https://elevon.ccxlv.dev/docs/agent) docs for commands and day-to-day use.
 
 ## GitHub Actions
 
-Install the Elevon CLI in GitHub Actions with
-[`hesychia-dev/setup-elevon`](https://github.com/hesychia-dev/setup-elevon).
+See [GitHub Actions](https://elevon.ccxlv.dev/docs/ci) for deploying from CI.
 
 See [`DEVELOPMENT.md`](DEVELOPMENT.md) for workspace details and development
 checks. See [`TODO.md`](TODO.md) for planned work.
