@@ -1,0 +1,21 @@
+---
+title: Registry
+description: Container registry settings in deploy.yml.
+icon: Package
+---
+
+The `registry` block is used to push images and is also passed through so the
+agent can pull them.
+
+```yaml
+registry:
+  # server: ghcr.io
+  username: $GHCR_USERNAME
+  password: $GHCR_PASSWORD
+```
+
+| Field | Meaning |
+| --- | --- |
+| `server` <span className="doc-optional">optional</span> | Registry host. Defaults to `ghcr.io`. Plain string, not `$ENV`. |
+| `username` | Registry username. Supports `$NAME`. |
+| `password` | Registry password or token. Supports `$NAME`. |

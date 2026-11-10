@@ -1,0 +1,21 @@
+---
+title: Elevon
+description: Agent connection settings in deploy.yml.
+icon: Server
+---
+
+The `elevon` block tells the CLI how to reach your agent.
+
+```yaml
+elevon:
+  agent:
+    url: $AGENT_URL
+    key: $AGENT_KEY
+```
+
+| Field | Meaning |
+| --- | --- |
+| `agent.url` | Base URL for the agent API (through the agent domain / proxy) |
+| `agent.key` | API key string from agent install or `elevon-agent key create` |
+
+Both fields support `$NAME` environment expansion.

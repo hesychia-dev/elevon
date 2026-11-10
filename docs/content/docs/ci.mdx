@@ -1,0 +1,85 @@
+---
+title: GitHub Actions
+description: Deploy from CI with the Elevon CLI on Ubuntu runners.
+icon: GitBranch
+---
+
+<WelcomeLead>
+  Commit a deploy config, store secrets in the repo, install the CLI in the
+  workflow, then ship a release on push.
+</WelcomeLead>
+
+## Requirements
+
+- Ubuntu GitHub Actions runner (has Docker)
+- `.elevon/deploy.yml` (or another path via `-c` / `-p`) in the repository
+- Network path from the runner to your agent URL
+- Registry credentials the runner can push with, and the agent can pull with
+
+## Secrets
+
+Map the same `$NAME` values your [deploy config](/docs/cli/configuration/env#environment-expansion)
+expects. Typical repository secrets:
+
+| Secret | Used as |
+| --- | --- |
+| `AGENT_URL` | Agent URL the runner can reach |
+| `AGENT_KEY` | API key from agent install (or a dedicated CI key) |
+| `GHCR_USERNAME` | Registry username |
+| `GHCR_PASSWORD` | Registry password or token |
+
+Add more secrets for any other `$NAME` fields you use (`TLS_CERT`, app env, and
+so on).
+
+Prefer a dedicated agent key for CI (`elevon agent key create`) so you can
+revoke it without rotating your laptop key.
+
+## Workflow
+
+Install the CLI with
+[`hesychia-dev/setup-elevon`](https://github.com/hesychia-dev/setup-elevon),
+then deploy:
+
+```yaml
+name: Deploy
+
+on:
+  push:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Elevon
+        uses: hesychia-dev/setup-elevon@v1
+
+      - name: Deploy
+        env:
+          AGENT_URL: ${{ secrets.AGENT_URL }}
+          AGENT_KEY: ${{ secrets.AGENT_KEY }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_PASSWORD: ${{ secrets.GHCR_PASSWORD }}
+        run: elevon deploy
+```
+
+Pin a CLI version when you want reproducible installs:
+
+```yaml
+- uses: hesychia-dev/setup-elevon@v1
+  with:
+    version: 1.2.3
+```
+
+Use `-p` / `--project` or `-c` / `--config` if the workflow should load a
+non-default deploy file.
+
+## Notes
+
+`elevon deploy` still builds and pushes from the runner. Keep the Dockerfile
+and ignore files in the build context so unrelated checkout noise does not force
+needless rebuilds — see [Build](/docs/cli/configuration/build).
+
+The runner must reach the agent the same way your laptop does. If the agent is
+only on a private network, put the job on a runner that can see that network.

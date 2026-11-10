@@ -1,0 +1,44 @@
+---
+title: Overview
+description: "`deploy.yml` defaults and where each block is documented."
+icon: BookOpen
+---
+
+Create the file with `elevon init`. Default path is `.elevon/deploy.yml`.
+
+A minimal web deploy looks like this:
+
+```yaml
+name: my-app
+image: myorg/my-app
+
+elevon:
+  agent:
+    url: $AGENT_URL
+    key: $AGENT_KEY
+
+registry:
+  username: $GHCR_USERNAME
+  password: $GHCR_PASSWORD
+
+routing:
+  domain: app.example.com
+  port: 3000
+
+build: .
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Project name sent with deploy payloads |
+| `image` | Image repository under the registry (not the full `host/repo:tag`) |
+| `keep_releases` <span className="doc-optional">optional</span> | How many releases the agent should keep. Defaults to `5`. |
+
+Field reference:
+
+- [Elevon](/docs/cli/configuration/elevon) for agent URL and key
+- [Registry](/docs/cli/configuration/registry) for push credentials
+- [Routing](/docs/cli/configuration/routing) for domain, port, TLS, and static
+- [Build](/docs/cli/configuration/build) for image context
+- [Env](/docs/cli/configuration/env) for runtime variables
+- [Apps](/docs/cli/configuration/apps) for multi-process roles

@@ -1,0 +1,76 @@
+---
+title: How it works
+description: How the Elevon CLI builds, pushes, and deploys to the agent.
+icon: Workflow
+---
+
+<WelcomeLead>
+  The CLI owns the client side of a release: resolve config, build and push an
+  image, then send a secured request to the agent with everything that release
+  needs at runtime.
+</WelcomeLead>
+
+## One command path
+
+`elevon deploy` runs the full client path:
+
+<FlowSteps note="Build and push always run as part of deploy. There is no flag to skip them.">
+  <FlowStep>
+    Load the deploy config and resolve credentials from the environment
+  </FlowStep>
+  <FlowStep>
+    Build the container image locally (or in CI) from the build context
+  </FlowStep>
+  <FlowStep>
+    Push the image to your registry
+  </FlowStep>
+  <FlowStep>
+    Send the deploy payload to the agent, including runtime config for that release
+  </FlowStep>
+</FlowSteps>
+
+The payload is the project configuration — a single `deploy.yml`. The agent
+stores what it needs per release; nothing sensitive is baked into the image
+layers.
+
+## Config file
+
+Default path is `.elevon/deploy.yml`.
+
+| Flag | Meaning |
+| --- | --- |
+| `-c` / `--config` | Path to a specific deploy file |
+| `-p` / `--project` | Load `.elevon/deploy.<name>.yml` |
+
+Values marked with `$NAME` in supported fields are read from the environment.
+See [Env](/docs/cli/configuration/env#environment-expansion) for which fields
+that applies to.
+
+## Apps in one image
+
+If `apps:` is omitted, Elevon treats the project as a single app named `web`.
+You can define several apps that share the same image, including `worker` roles
+with no domain routing.
+
+Limit a deploy with:
+
+```bash
+elevon deploy --app web
+elevon deploy --app web worker
+```
+
+## Rollback
+
+Rollback brings back a previous release that is still **drained**, not pruned.
+Select the target with `--app` or `--id`. When you pass `--id`, that deployment
+must be in the drained state. The agent reactivates that release's files and
+routing, then drains the current one.
+
+```bash
+elevon rollback --app web [worker]
+elevon rollback --id <id> [<id>]
+```
+
+If the previous env or static files are already pruned, or a drain is still in
+progress, rollback cannot proceed yet. The agent keeps only as many releases as
+`keep_releases` in the deploy config allows.

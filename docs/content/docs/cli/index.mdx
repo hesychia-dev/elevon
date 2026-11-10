@@ -1,0 +1,36 @@
+---
+title: Overview
+description: What the Elevon CLI does and how to get started.
+icon: BookOpen
+---
+
+The CLI is Elevon's half on your machine or in CI. It reads a deploy config,
+builds and pushes images, and talks to the agent to ship or roll back releases.
+
+## Initialize
+
+Install the CLI from [Installation](/docs/install) first.
+
+Then create a deploy config:
+
+```bash
+elevon init
+```
+
+This creates `.elevon/deploy.yml`.
+
+By default the CLI loads `.elevon/deploy.yml`. Use `-c` / `--config` for another
+file, or `-p` / `--project` for `.elevon/deploy.<name>.yml`.
+
+## Ship a release
+
+```bash
+elevon deploy
+```
+
+That builds the image, pushes it to your registry, and sends the deploy config
+to the agent.
+
+See [How it works](/docs/cli/how-it-works) for the client flow,
+[Commands](/docs/cli/commands) for the full reference, and
+[Configuration](/docs/cli/configuration) for `deploy.yml` fields.

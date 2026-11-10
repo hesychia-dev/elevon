@@ -1,0 +1,55 @@
+---
+title: Routing
+description: Domain, port, TLS, and static settings in deploy.yml.
+icon: Network
+---
+
+The `routing` block is for web (and static) apps. Worker-only projects can omit
+it.
+
+```yaml
+routing:
+  domain: app.example.com
+  port: 3000
+```
+
+| Field | Meaning |
+| --- | --- |
+| `domain` | Hostname the proxy should route to this app |
+| `port` <span className="doc-optional">optional</span> | Container listen port. Supports `$NAME`. Not used for static apps. |
+| `tls` <span className="doc-optional">optional</span> | PEM cert and key **content** (often via `$ENV`), not filesystem paths |
+| `static` <span className="doc-optional">optional</span> | Serve extracted files instead of a long-running container |
+
+### `tls`
+
+```yaml
+routing:
+  tls:
+    cert: $TLS_CERT
+    key: $TLS_KEY
+```
+
+| Field | Meaning |
+| --- | --- |
+| `cert` | Certificate PEM content. Supports `$NAME`. |
+| `key` | Private key PEM content. Supports `$NAME`. |
+
+### `static`
+
+Still build a Docker image so the agent can extract files. Then the proxy
+serves them. Omit `port` for static apps.
+
+```yaml
+routing:
+  static:
+    directory: dist
+    index: index.html
+```
+
+| Field | Meaning |
+| --- | --- |
+| `directory` | Directory inside the image to extract |
+| `index` <span className="doc-optional">optional</span> | File served for `/`. Defaults to `index.html`. |
+
+`index` matters for static sites that need a root page. If you are only
+serving files, leave it unset unless something hits `/`.

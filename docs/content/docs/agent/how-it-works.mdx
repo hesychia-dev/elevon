@@ -116,15 +116,6 @@ elevon-agent key revoke <id>
 elevon-agent key delete <id>
 ```
 
-## Rollback
-
-Rollback brings back a previous **drained** release that is still within the
-keep window. The CLI selects it with `--app` or `--id`. The agent reactivates
-that release's files and routing, then drains the current one.
-
-If the previous env or static files are already pruned, or a drain is still in
-progress, rollback cannot proceed yet.
-
 ## Operations
 
 ```bash
