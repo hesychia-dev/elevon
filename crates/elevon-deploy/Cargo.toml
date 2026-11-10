@@ -9,7 +9,6 @@ heavy_tests = []
 [dependencies]
 shlex = "2.0.1"
 bytesize = { version = "2.7.0", features = ["serde"] }
-git2 = "0.21.0"
 ignore = "0.4.34"
 
 anyhow.workspace = true

@@ -1,0 +1,17 @@
+name: Elevon deploy
+description: Set up the Elevon CLI and deploy a project
+
+inputs:
+  project:
+    description: Project name for `elevon deploy -p`
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Elevon
+      uses: hesychia-dev/setup-elevon@v1
+
+    - name: Deploy
+      shell: bash
+      run: elevon deploy -p "${{ inputs.project }}"

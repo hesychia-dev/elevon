@@ -2,10 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::{
-    config::{BuildConfig, BuildOptions},
-    util::get_file_walker,
-};
+use crate::config::{BuildConfig, BuildOptions};
 
 pub fn image_reference(registry_server: &str, image_name: &str, tag: &str) -> String {
     format!(
@@ -75,21 +72,17 @@ pub fn tar_context(build_context: BuildContextProps) -> Result<Vec<u8>> {
     use std::fs::File;
     use tar::{Builder, EntryType, Header, HeaderMode};
 
-    let walker = get_file_walker(&build_context);
+    let paths = crate::util::collect_context_files(&build_context)?;
 
     let mut ar = Builder::new(Vec::new());
     ar.mode(HeaderMode::Deterministic);
 
-    for result in walker {
-        let entry = result.context("failed to get entry")?;
-        let path = entry.path();
-        let metadata = entry
+    for path in paths {
+        crate::util::warn_if_dotenv_in_context(&path);
+
+        let metadata = path
             .metadata()
             .with_context(|| format!("failed to read metadata for {}", path.display()))?;
-
-        if !metadata.is_file() {
-            continue;
-        }
 
         let relative_path = path
             .strip_prefix(&build_context.context_dir)
@@ -102,7 +95,7 @@ pub fn tar_context(build_context: BuildContextProps) -> Result<Vec<u8>> {
         header.set_size(metadata.len());
         header.set_path(relative_path)?;
         header.set_cksum();
-        ar.append(&header, File::open(path)?)?;
+        ar.append(&header, File::open(&path)?)?;
     }
 
     Ok(ar.into_inner()?)

@@ -1,0 +1,29 @@
+name: Deploy docs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - ".elevon/deploy.docs.yml"
+      - ".github/workflows/deploy-docs.yml"
+      - ".github/actions/elevon-deploy/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/elevon-deploy
+        with:
+          project: docs
+        env:
+          AGENT_URL: ${{ secrets.AGENT_URL }}
+          AGENT_KEY: ${{ secrets.AGENT_KEY }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_PASSWORD: ${{ secrets.GHCR_PASSWORD }}
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_KEY: ${{ secrets.TLS_KEY }}

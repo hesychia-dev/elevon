@@ -55,7 +55,7 @@ pub async fn build_image(
             Err(err) => bail!("failed to inspect registry image: {}", err),
         };
 
-        if image_exists && image_props.image_tag != "modified" {
+        if image_exists {
             return Ok(false);
         }
     }
