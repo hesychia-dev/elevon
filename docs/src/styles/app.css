@@ -121,6 +121,18 @@ body {
   display: none;
 }
 
+/* TOC active item: prose link styles otherwise win over data-[active] utilities */
+#nd-toc a[data-active="true"],
+#nd-toc-popover a[data-active="true"] {
+  color: var(--color-fd-primary);
+  font-weight: 500;
+}
+
+/* Let last headings reach the TOC observer zone (threshold 0.9) */
+#nd-page {
+  padding-bottom: min(70vh, 28rem);
+}
+
 @keyframes elevon-rise {
   from {
     opacity: 0;
