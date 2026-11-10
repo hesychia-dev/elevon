@@ -9,6 +9,7 @@ on:
       - "scripts/**"
       - ".elevon/deploy.scripts.yml"
       - ".github/workflows/deploy-scripts.yml"
+      - ".github/actions/elevon-deploy/**"
 
 jobs:
   deploy:
@@ -16,10 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Elevon
-        uses: hesychia-dev/setup-elevon@v1
-
-      - name: Deploy
+      - uses: ./.github/actions/elevon-deploy
+        with:
+          project: scripts
         env:
           AGENT_URL: ${{ secrets.AGENT_URL }}
           AGENT_KEY: ${{ secrets.AGENT_KEY }}
@@ -27,4 +27,3 @@ jobs:
           GHCR_PASSWORD: ${{ secrets.GHCR_PASSWORD }}
           TLS_CERT: ${{ secrets.TLS_CERT }}
           TLS_KEY: ${{ secrets.TLS_KEY }}
-        run: elevon deploy -p scripts
