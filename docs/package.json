@@ -2,6 +2,7 @@
   "name": "docs",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@12.16.1",
   "sideEffects": false,
   "scripts": {
     "dev": "vite dev",
