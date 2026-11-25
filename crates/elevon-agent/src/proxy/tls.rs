@@ -22,6 +22,31 @@ impl DynamicCert {
         Self(ArcSwap::new(Arc::new(HashMap::new())))
     }
 
+    pub fn setup_agent_certs(&self, domain: &str) -> Result<()> {
+        let options = AppEnvOptions::agent();
+
+        let stored_cert = get_tls_file(TlsType::Cert, options.clone())?;
+        let stored_key = get_tls_file(TlsType::Key, options)?;
+
+        self.add_cert_from_paths(
+            domain.to_string(),
+            stored_cert.to_str().context("invalid certificate path")?,
+            stored_key.to_str().context("invalid key path")?,
+        )?;
+
+        Ok(())
+    }
+
+    pub fn add_cert(&self, app_id: &str, deployment_id: &str, domain: String) -> Result<()> {
+        let (stored_cert, stored_key) = self.get_stored_key_paths(app_id, deployment_id)?;
+
+        self.add_cert_from_paths(
+            domain,
+            stored_cert.to_str().context("invalid certificate path")?,
+            stored_key.to_str().context("invalid key path")?,
+        )
+    }
+
     fn get_stored_key_paths(
         &self,
         app_id: &str,
@@ -53,36 +78,11 @@ impl DynamicCert {
         Ok(())
     }
 
-    pub fn add_cert(&self, app_id: &str, deployment_id: &str, domain: String) -> Result<()> {
-        let (stored_cert, stored_key) = self.get_stored_key_paths(app_id, deployment_id)?;
-
-        self.add_cert_from_paths(
-            domain,
-            stored_cert.to_str().context("invalid certificate path")?,
-            stored_key.to_str().context("invalid key path")?,
-        )
-    }
-
     fn find_certs_with_hostname(&self, hostname: &str) -> Option<(Arc<X509>, Arc<PKey<Private>>)> {
         self.0
             .load()
             .get(hostname)
             .map(|(c, k)| (Arc::new(c.clone()), Arc::new(k.clone())))
-    }
-
-    pub fn setup_agent_certs(&self, domain: &str) -> Result<()> {
-        let options = AppEnvOptions::agent();
-
-        let stored_cert = get_tls_file(TlsType::Cert, options.clone())?;
-        let stored_key = get_tls_file(TlsType::Key, options)?;
-
-        self.add_cert_from_paths(
-            domain.to_string(),
-            stored_cert.to_str().context("invalid certificate path")?,
-            stored_key.to_str().context("invalid key path")?,
-        )?;
-
-        Ok(())
     }
 }
 

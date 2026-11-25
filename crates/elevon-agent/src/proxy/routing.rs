@@ -64,11 +64,14 @@ impl ProxyRegistry {
             port: env.agent_port,
         };
 
+        let dynamic_cert = DynamicCert::new();
+        dynamic_cert.setup_agent_certs(&env.agent_domain).unwrap();
+
         Self {
             agent: agent_routing,
             routes: ArcSwap::from_pointee(HashMap::new()),
             domain_registry: DomainRegistry::new(),
-            dynamic_cert: Arc::new(DynamicCert::new()),
+            dynamic_cert: Arc::new(dynamic_cert),
         }
     }
 
