@@ -60,19 +60,19 @@ impl ProxyState {
 
             match response {
                 Ok(res) => {
-                    let containers: Vec<DeployAppData> = res.json().await?;
+                    let apps: Vec<DeployAppData> = res.json().await?;
 
-                    if containers.is_empty() {
+                    if apps.is_empty() {
                         return Ok(());
                     }
 
                     tracing::info!(
-                        "Found {} running containers, upserting them...",
-                        containers.len()
+                        "Found {} running apps, upserting them...",
+                        apps.len()
                     );
 
-                    for container in containers {
-                        // self.upsert_route(container)?;
+                    for app in apps {
+                        self.registry.upsert(app)?;
                     }
 
                     return Ok(());
