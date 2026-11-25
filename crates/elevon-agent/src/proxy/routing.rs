@@ -308,21 +308,17 @@ impl DomainRouteTable {
     }
 }
 
-struct DomainRegistry {
-    tables: ArcSwap<HashMap<String, Arc<DomainRouteTable>>>,
-}
+struct DomainRegistry(ArcSwap<HashMap<String, Arc<DomainRouteTable>>>);
 
 impl DomainRegistry {
     fn new() -> Self {
-        Self {
-            tables: ArcSwap::from_pointee(HashMap::new()),
-        }
+        Self(ArcSwap::from_pointee(HashMap::new()))
     }
 
     fn rebuild(&self, domain: &str, entries: &[RouteEntry]) -> Result<()> {
         let new_table = Arc::new(DomainRouteTable::rebuild(entries)?);
 
-        self.tables.rcu(|current| {
+        self.0.rcu(|current| {
             let mut next = (**current).clone();
             next.insert(domain.to_owned(), new_table.clone());
             Arc::new(next)
@@ -332,8 +328,8 @@ impl DomainRegistry {
     }
 
     fn find_path_route(&self, domain: &str, request_path: &str) -> Option<PathRoute> {
-        let tables = self.tables.load();
-        let table = tables.get(domain)?;
+        let registry = self.0.load();
+        let table = registry.get(domain)?;
 
         let path_route = table.clone().match_path(request_path)?.clone();
 
