@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use elevon_contracts::deploy::config::AppRoutingPayload;
+use elevon_contracts::deploy::AppRoutingPayload;
 use serde::{Deserialize, Serialize};
 
 use crate::api::db::models::DeploymentStatus;

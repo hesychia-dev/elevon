@@ -1,6 +1,6 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use elevon_config::{ConfigError, ResolveEnvCredentials, resolve_env_or_literal};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppHealthCheckConfig {
@@ -75,7 +75,7 @@ pub struct AppRoutingConfig {
     pub port: Option<PortConfig>,
 
     #[serde(rename = "static")]
-    pub static_files: Option<StaticConfig>,
+    pub static_config: Option<StaticRoutingConfig>,
 
     pub tls: Option<TlsConfig>,
 }
@@ -130,17 +130,17 @@ impl ResolveEnvCredentials for TlsConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StaticConfig {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StaticRoutingConfig {
     /// Work directory in the Dockerfile
     pub directory: String,
 
     /// Index file name that will be served as root
-    #[serde(default = "StaticConfig::default_index")]
+    #[serde(default = "StaticRoutingConfig::default_index")]
     pub index: String,
 }
 
-impl StaticConfig {
+impl StaticRoutingConfig {
     fn default_index() -> String {
         "index.html".to_string()
     }
@@ -154,66 +154,75 @@ pub enum PortConfig {
 }
 
 impl PortConfig {
-    fn as_literal(&self) -> Result<u16> {
-        match self {
+    pub fn resolve(&self) -> Result<u16> {
+        let port = match self {
             PortConfig::Literal(p) => Ok(*p),
-            _ => {
-                bail!("Port is not mapped")
+            PortConfig::Env(key) => {
+                let value = resolve_env_or_literal(key).map_err(|e| ConfigError::InvalidValue {
+                    field: "routing.port_env".to_string(),
+                    value: e.to_string(),
+                })?;
+                value.parse::<u16>().map_err(|_| ConfigError::InvalidValue {
+                    field: "routing.port".to_string(),
+                    value,
+                })
             }
-        }
+        }?;
+
+        Ok(port)
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct AppRoutingPayload {
-    pub domain: String,
-
-    #[serde(default, deserialize_with = "deserialize_stripped_prefix")]
-    pub path_prefix: Option<String>,
-
-    pub port: Option<u16>,
-
-    pub static_files: Option<StaticConfig>,
-
-    pub tls: Option<TlsConfig>,
-}
-
-impl TryFrom<&AppRoutingConfig> for AppRoutingPayload {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &AppRoutingConfig) -> std::prelude::v1::Result<Self, Self::Error> {
-        Ok(Self {
-            domain: value.domain.clone(),
-            path_prefix: value.path_prefix.clone(),
-            port: value.port.as_ref().map(|p| p.as_literal()).transpose()?,
-            static_files: value.static_files.clone(),
-            tls: value.tls.clone(),
-        })
-    }
-}
-
-fn deserialize_stripped_prefix<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let opt: Option<String> = Option::deserialize(deserializer)?;
-    Ok(opt.map(|prefix| prefix.trim_end_matches('/').to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::AppRoutingPayload;
-
-    #[test]
-    fn routing_payload_preserves_port_through_serialization() {
-        let routing = AppRoutingPayload {
-            port: Some(4321),
-            ..Default::default()
-        };
-
-        let json = serde_json::to_string(&routing).unwrap();
-        let decoded: AppRoutingPayload = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded.port, Some(4321));
-    }
-}
+// #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+// pub struct AppRoutingPayload {
+//     pub domain: String,
+//
+//     #[serde(default, deserialize_with = "deserialize_stripped_prefix")]
+//     pub path_prefix: Option<String>,
+//
+//     pub port: Option<u16>,
+//
+//     pub static_files: Option<StaticRoutingConfig>,
+//
+//     pub tls: Option<TlsConfig>,
+// }
+//
+// impl TryFrom<&AppRoutingConfig> for AppRoutingPayload {
+//     type Error = anyhow::Error;
+//
+//     fn try_from(value: &AppRoutingConfig) -> std::prelude::v1::Result<Self, Self::Error> {
+//         Ok(Self {
+//             domain: value.domain.clone(),
+//             path_prefix: value.path_prefix.clone(),
+//             port: value.port.as_ref().map(|p| p.as_literal()).transpose()?,
+//             static_files: value.static_files.clone(),
+//             tls: value.tls.clone(),
+//         })
+//     }
+// }
+//
+// fn deserialize_stripped_prefix<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+// where
+//     D: Deserializer<'de>,
+// {
+//     let opt: Option<String> = Option::deserialize(deserializer)?;
+//     Ok(opt.map(|prefix| prefix.trim_end_matches('/').to_string()))
+// }
+//
+// #[cfg(test)]
+// mod tests {
+//     use super::AppRoutingPayload;
+//
+//     #[test]
+//     fn routing_payload_preserves_port_through_serialization() {
+//         let routing = AppRoutingPayload {
+//             port: Some(4321),
+//             ..Default::default()
+//         };
+//
+//         let json = serde_json::to_string(&routing).unwrap();
+//         let decoded: AppRoutingPayload = serde_json::from_str(&json).unwrap();
+//
+//         assert_eq!(decoded.port, Some(4321));
+//     }
+// }

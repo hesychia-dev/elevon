@@ -2,7 +2,7 @@ use anyhow::Result;
 use elevon_contracts::{
     cli::app::{AppCommands, DeploymentCommands},
     cli_verify_action_with_items,
-    deploy::{AppStopPayload, log_stream_events},
+    deploy::{AppRoutingConfigTrait, AppStopPayload, log_stream_events},
 };
 
 use crate::{
@@ -120,7 +120,10 @@ pub async fn handle_app_stop(
             continue;
         }
 
-        let app_port = active_deployment.routing.as_ref().and_then(|r| r.port);
+        let app_port = active_deployment
+            .routing
+            .as_ref()
+            .and_then(|r| r.config.port());
 
         let app_data = DrainAppData {
             deployment_id: active_deployment.id.to_string(),

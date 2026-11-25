@@ -1,7 +1,9 @@
+mod routing;
 mod socket;
 mod state;
 mod tls;
 pub mod types;
+mod utils;
 
 use std::{sync::Arc, time::Duration};
 
@@ -10,206 +12,196 @@ use async_trait::async_trait;
 use elevon_http::{check_port, runtime::run_async};
 use futures_util::{StreamExt, stream};
 use pingora::{
-    Error, ErrorType, Result,
-    http::ResponseHeader,
-    listeners::tls::TlsSettings,
-    protocols::l4::socket::SocketAddr,
-    proxy::{ProxyHttp, Session, http_proxy_service},
+    listeners::{TlsAccept, tls::TlsSettings},
+    proxy::http_proxy_service,
     server::{
         RunArgs, Server, ShutdownWatch,
         configuration::{Opt, ServerConf},
     },
     services::background::{BackgroundService, background_service},
-    upstreams::peer::HttpPeer,
 };
 
 use crate::{
     env::ElevonEnv,
-    proxy::{
-        socket::SocketControl,
-        state::{ProxyState, extract_domain, not_found_response},
-    },
+    proxy::{routing::ProxyService, socket::SocketControl, state::ProxyState, tls::SharedTlsCert},
 };
 
-#[derive(Debug, Default)]
-pub struct RequestCtx {
-    pub deployment_id: Option<String>,
-}
+// #[derive(Debug, Default)]
+// pub struct RequestCtx {
+//     pub deployment_id: Option<String>,
+// }
+//
+// pub struct Proxy {
+//     pub state: Arc<ProxyState>,
+// }
+//
+// #[async_trait]
+// impl ProxyHttp for Proxy {
+//     type CTX = RequestCtx;
+//     fn new_ctx(&self) -> Self::CTX {
+//         RequestCtx::default()
+//     }
+//
+//     async fn upstream_peer(
+//         &self,
+//         session: &mut Session,
+//         ctx: &mut Self::CTX,
+//     ) -> Result<Box<HttpPeer>> {
+//         let host = session
+//             .req_header()
+//             .headers
+//             .get("Host")
+//             .ok_or_else(|| Error::explain(ErrorType::HTTPStatus(502), "no Host header"))?;
+//
+//         let domain = extract_domain(host).ok_or_else(|| {
+//             Error::explain(
+//                 ErrorType::HTTPStatus(502),
+//                 "could not get domain out of host",
+//             )
+//         })?;
+//
+//         if domain == self.state.agent.domain {
+//             let agent_addr = format!("127.0.0.1:{}", self.state.agent.port)
+//                 .parse()
+//                 .expect("agent route must have a valid address");
+//
+//             return Ok(Box::new(HttpPeer::new(
+//                 SocketAddr::Inet(agent_addr),
+//                 false,
+//                 String::new(),
+//             )));
+//         }
+//
+//         let lbs = self.state.lbs.load();
+//         let Some(lb) = lbs.get(domain) else {
+//             return Error::e_explain(ErrorType::HTTPStatus(404), "no route for host");
+//         };
+//
+//         let upstream = lb
+//             .select(b"", 256)
+//             .ok_or_else(|| Error::explain(ErrorType::HTTPStatus(502), "no healthy upstream"))?;
+//
+//         let selected_port = upstream.addr.as_inet().map(|inet| inet.port());
+//
+//         if let Some(port) = selected_port {
+//             let selected = self.state.get_backend_by_port(port);
+//             if let Some(backend) = selected {
+//                 ctx.deployment_id = Some((*backend.deployment_id).to_string());
+//             }
+//         }
+//
+//         Ok(Box::new(HttpPeer::new(upstream, false, String::new())))
+//     }
+//
+//     async fn request_filter(
+//         &self,
+//         session: &mut Session,
+//         ctx: &mut Self::CTX,
+//     ) -> Result<bool, Box<pingora::Error>> {
+//         if !self.state.path_has_active_app(session).unwrap_or(false) {
+//             session.shutdown().await;
+//             return Ok(true);
+//         }
+//
+//         if let Ok(file_found) = self.state.handle_static_app_request(session).await {
+//             if !file_found {
+//                 not_found_response(session).await?;
+//             }
+//             return Ok(true);
+//         }
+//
+//         if let Some(deployment_id) = ctx.deployment_id.clone() {
+//             self.state.increase_inflight_count(&deployment_id);
+//         }
+//
+//         Ok(false)
+//     }
+//
+//     async fn response_filter(
+//         &self,
+//         _session: &mut Session,
+//         _upstream_response: &mut ResponseHeader,
+//         ctx: &mut Self::CTX,
+//     ) -> Result<()> {
+//         if let Some(deployment_id) = ctx.deployment_id.clone() {
+//             self.state.decrease_inflight_count(&deployment_id);
+//         }
+//
+//         Ok(())
+//     }
+// }
 
-pub struct Proxy {
-    pub state: Arc<ProxyState>,
-}
+// pub struct LbHealthCheck {
+//     pub state: Arc<ProxyState>,
+// }
+//
+// #[async_trait]
+// impl BackgroundService for LbHealthCheck {
+//     async fn start(&self, mut shutdown: ShutdownWatch) {
+//         let mut tick = tokio::time::interval(Duration::from_secs(1));
+//         loop {
+//             tokio::select! {
+//                 _ = shutdown.changed() => break,
+//                     _ = tick.tick() => {
+//                         let lbs: Vec<_> = self.state.lbs.load_full().values().cloned().collect();
+//                         stream::iter(lbs)
+//                             .for_each_concurrent(32, |lb| async move {
+//                                 lb.backends().run_health_check(true).await;
+//                             })
+//                             .await;
+//                     }
+//             }
+//         }
+//     }
+// }
 
-#[async_trait]
-impl ProxyHttp for Proxy {
-    type CTX = RequestCtx;
-    fn new_ctx(&self) -> Self::CTX {
-        RequestCtx::default()
-    }
-
-    async fn upstream_peer(
-        &self,
-        session: &mut Session,
-        ctx: &mut Self::CTX,
-    ) -> Result<Box<HttpPeer>> {
-        let host = session
-            .req_header()
-            .headers
-            .get("Host")
-            .ok_or_else(|| Error::explain(ErrorType::HTTPStatus(502), "no Host header"))?;
-
-        let domain = extract_domain(host).ok_or_else(|| {
-            Error::explain(
-                ErrorType::HTTPStatus(502),
-                "could not get domain out of host",
-            )
-        })?;
-
-        if domain == self.state.agent.domain {
-            let agent_addr = format!("127.0.0.1:{}", self.state.agent.port)
-                .parse()
-                .expect("agent route must have a valid address");
-
-            return Ok(Box::new(HttpPeer::new(
-                SocketAddr::Inet(agent_addr),
-                false,
-                String::new(),
-            )));
-        }
-
-        let lbs = self.state.lbs.load();
-        let Some(lb) = lbs.get(domain) else {
-            return Error::e_explain(ErrorType::HTTPStatus(404), "no route for host");
-        };
-
-        let upstream = lb
-            .select(b"", 256)
-            .ok_or_else(|| Error::explain(ErrorType::HTTPStatus(502), "no healthy upstream"))?;
-
-        let selected_port = match upstream.addr {
-            SocketAddr::Inet(addr) => Some(addr.port()),
-            _ => None,
-        };
-
-        if let Some(port) = selected_port {
-            let selected = self.state.get_backend_by_port(port);
-            if let Some(backend) = selected {
-                ctx.deployment_id = Some((*backend.deployment_id).to_string());
-            }
-        }
-
-        Ok(Box::new(HttpPeer::new(upstream, false, String::new())))
-    }
-
-    async fn request_filter(
-        &self,
-        session: &mut Session,
-        ctx: &mut Self::CTX,
-    ) -> Result<bool, Box<pingora::Error>> {
-        if !self.state.path_has_active_app(session).unwrap_or(false) {
-            session.shutdown().await;
-            return Ok(true);
-        }
-
-        if let Ok(file_found) = self.state.handle_static_app_request(session).await {
-            if !file_found {
-                not_found_response(session).await?;
-            }
-            return Ok(true);
-        }
-
-        if let Some(deployment_id) = ctx.deployment_id.clone() {
-            self.state.increase_inflight_count(&deployment_id);
-        }
-
-        Ok(false)
-    }
-
-    async fn response_filter(
-        &self,
-        _session: &mut Session,
-        _upstream_response: &mut ResponseHeader,
-        ctx: &mut Self::CTX,
-    ) -> Result<()> {
-        if let Some(deployment_id) = ctx.deployment_id.clone() {
-            self.state.decrease_inflight_count(&deployment_id);
-        }
-
-        Ok(())
-    }
-}
-
-pub struct LbHealthCheck {
-    pub state: Arc<ProxyState>,
-}
-
-#[async_trait]
-impl BackgroundService for LbHealthCheck {
-    async fn start(&self, mut shutdown: ShutdownWatch) {
-        let mut tick = tokio::time::interval(Duration::from_secs(1));
-        loop {
-            tokio::select! {
-                _ = shutdown.changed() => break,
-                    _ = tick.tick() => {
-                        let lbs: Vec<_> = self.state.lbs.load_full().values().cloned().collect();
-                        stream::iter(lbs)
-                            .for_each_concurrent(32, |lb| async move {
-                                lb.backends().run_health_check(true).await;
-                            })
-                            .await;
-                    }
-            }
-        }
-    }
-}
-
-pub struct DrainJanitor {
-    pub state: Arc<ProxyState>,
-}
-
-#[async_trait]
-impl BackgroundService for DrainJanitor {
-    async fn start(&self, mut shutdown: ShutdownWatch) {
-        let mut tick = tokio::time::interval(Duration::from_secs(2));
-        loop {
-            tokio::select! {
-                _ = shutdown.changed() => break,
-                _ = tick.tick() => {
-                    let grace = Duration::from_secs(30);
-                    for (deployment_id, container_id) in self.state.ready_to_terminate(grace) {
-                        // A scenario where this container is a worker, that is working on a task
-                        // that takes 60s to finish, `stop_container` will forcefully kill the container,
-                        // since Docker first sends SIGTERM, wait for ~10 seconds and then if the container,
-                        // doesn't exit automatically Docker sends SIGKILL and forcefully kills the container.
-                        // Meaning the worker might not have finished the task it was working on.
-                        //
-                        // A solution to this would be having a configurable timeout option in `apps.runtime` settings.
-
-                        if let Some(container_id) = container_id {
-                            if let Err(err) = self.state.docker
-                                .stop_container(&container_id, None)
-                                .await
-                            {
-                                tracing::warn!(%container_id, %err, "failed to stop container");
-                                // TODO: If it fails just delete from the db
-                                continue;
-                            }
-
-                            let _ = self.state.docker
-                                .remove_container(&container_id, None)
-                                .await;
-                        }
-
-                        self.state.remove_backend(&deployment_id);
-                        tracing::info!(%deployment_id, "drained deployment terminated");
-                        let routes = self.state.routes.load();
-                        tracing::info!("current routes: {:?}", routes);
-                    }
-                }
-            }
-        }
-    }
-}
+// pub struct DrainJanitor {
+//     pub state: Arc<ProxyState>,
+// }
+//
+// #[async_trait]
+// impl BackgroundService for DrainJanitor {
+//     async fn start(&self, mut shutdown: ShutdownWatch) {
+//         let mut tick = tokio::time::interval(Duration::from_secs(2));
+//         loop {
+//             tokio::select! {
+//                 _ = shutdown.changed() => break,
+//                 _ = tick.tick() => {
+//                     let grace = Duration::from_secs(30);
+//                     for (deployment_id, container_id) in self.state.ready_to_terminate(grace) {
+//                         // A scenario where this container is a worker, that is working on a task
+//                         // that takes 60s to finish, `stop_container` will forcefully kill the container,
+//                         // since Docker first sends SIGTERM, wait for ~10 seconds and then if the container,
+//                         // doesn't exit automatically Docker sends SIGKILL and forcefully kills the container.
+//                         // Meaning the worker might not have finished the task it was working on.
+//                         //
+//                         // A solution to this would be having a configurable timeout option in `apps.runtime` settings.
+//
+//                         if let Some(container_id) = container_id {
+//                             if let Err(err) = self.state.docker
+//                                 .stop_container(&container_id, None)
+//                                 .await
+//                             {
+//                                 tracing::warn!(%container_id, %err, "failed to stop container");
+//                                 // TODO: If it fails just delete from the db
+//                                 continue;
+//                             }
+//
+//                             let _ = self.state.docker
+//                                 .remove_container(&container_id, None)
+//                                 .await;
+//                         }
+//
+//                         self.state.remove_backend(&deployment_id);
+//                         tracing::info!(%deployment_id, "drained deployment terminated");
+//                         let routes = self.state.routes.load();
+//                         tracing::info!("current routes: {:?}", routes);
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
 
 pub fn run_proxy(env: &ElevonEnv, upgrade: bool) -> anyhow::Result<()> {
     // In development, run HTTP on port 6188.
@@ -237,7 +229,7 @@ pub fn run_proxy(env: &ElevonEnv, upgrade: bool) -> anyhow::Result<()> {
         (http_port.to_string(), https_port.map(|p| p.to_string()))
     };
 
-    let proxy_state = ProxyState::new(env).context("failed to create proxy state")?;
+    let proxy_state = ProxyState::new(env);
 
     let config = ServerConf {
         grace_period_seconds: Some(30),
@@ -256,15 +248,15 @@ pub fn run_proxy(env: &ElevonEnv, upgrade: bool) -> anyhow::Result<()> {
 
     let mut lb = http_proxy_service(
         &server.configuration,
-        Proxy {
-            state: proxy_state.clone(),
-        },
+        ProxyService(proxy_state.registry.clone()),
     );
 
     lb.add_tcp(&format!("0.0.0.0:{}", http_port));
     if let Some(https_port) = &https_port {
-        let tls_settings = TlsSettings::with_callbacks(Box::new(proxy_state.dynamic_cert.clone()))
-            .expect("failed to initialize TLS settings");
+        let tls_settings = TlsSettings::with_callbacks(Box::new(SharedTlsCert(
+            proxy_state.registry.dynamic_cert.clone(),
+        )))
+        .expect("failed to initialize TLS settings");
 
         lb.add_tls_with_settings(&format!("0.0.0.0:{}", https_port), None, tls_settings);
     }
@@ -275,20 +267,20 @@ pub fn run_proxy(env: &ElevonEnv, upgrade: bool) -> anyhow::Result<()> {
             state: proxy_state.clone(),
         },
     );
-
-    let lb_health_check = background_service(
-        "lb health check",
-        LbHealthCheck {
-            state: proxy_state.clone(),
-        },
-    );
-
-    let drain_janitor = background_service(
-        "drain janitor",
-        DrainJanitor {
-            state: proxy_state.clone(),
-        },
-    );
+    //
+    //     let lb_health_check = background_service(
+    //         "lb health check",
+    //         LbHealthCheck {
+    //             state: proxy_state.clone(),
+    //         },
+    //     );
+    //
+    //     let drain_janitor = background_service(
+    //         "drain janitor",
+    //         DrainJanitor {
+    //             state: proxy_state.clone(),
+    //         },
+    //     );
 
     let cloned_state = proxy_state.clone();
     std::thread::spawn(move || {
@@ -309,8 +301,8 @@ pub fn run_proxy(env: &ElevonEnv, upgrade: bool) -> anyhow::Result<()> {
 
     server.add_service(lb);
     server.add_service(control);
-    server.add_service(lb_health_check);
-    server.add_service(drain_janitor);
+    // server.add_service(lb_health_check);
+    // server.add_service(drain_janitor);
     server.run(RunArgs::default());
 
     Ok(())
