@@ -19,7 +19,7 @@ pub struct DynamicCert(Certs);
 
 impl DynamicCert {
     pub fn new() -> Self {
-        Self(ArcSwap::new(Arc::new(HashMap::new())))
+        Self(ArcSwap::from_pointee(HashMap::new()))
     }
 
     pub fn setup_agent_certs(&self, domain: &str) -> Result<()> {

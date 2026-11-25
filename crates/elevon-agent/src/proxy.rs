@@ -3,7 +3,6 @@ mod socket;
 mod state;
 mod tls;
 pub mod types;
-mod utils;
 
 use std::{sync::Arc, time::Duration};
 
@@ -25,111 +24,6 @@ use crate::{
     env::ElevonEnv,
     proxy::{routing::ProxyService, socket::SocketControl, state::ProxyState, tls::SharedTlsCert},
 };
-
-// #[derive(Debug, Default)]
-// pub struct RequestCtx {
-//     pub deployment_id: Option<String>,
-// }
-//
-// pub struct Proxy {
-//     pub state: Arc<ProxyState>,
-// }
-//
-// #[async_trait]
-// impl ProxyHttp for Proxy {
-//     type CTX = RequestCtx;
-//     fn new_ctx(&self) -> Self::CTX {
-//         RequestCtx::default()
-//     }
-//
-//     async fn upstream_peer(
-//         &self,
-//         session: &mut Session,
-//         ctx: &mut Self::CTX,
-//     ) -> Result<Box<HttpPeer>> {
-//         let host = session
-//             .req_header()
-//             .headers
-//             .get("Host")
-//             .ok_or_else(|| Error::explain(ErrorType::HTTPStatus(502), "no Host header"))?;
-//
-//         let domain = extract_domain(host).ok_or_else(|| {
-//             Error::explain(
-//                 ErrorType::HTTPStatus(502),
-//                 "could not get domain out of host",
-//             )
-//         })?;
-//
-//         if domain == self.state.agent.domain {
-//             let agent_addr = format!("127.0.0.1:{}", self.state.agent.port)
-//                 .parse()
-//                 .expect("agent route must have a valid address");
-//
-//             return Ok(Box::new(HttpPeer::new(
-//                 SocketAddr::Inet(agent_addr),
-//                 false,
-//                 String::new(),
-//             )));
-//         }
-//
-//         let lbs = self.state.lbs.load();
-//         let Some(lb) = lbs.get(domain) else {
-//             return Error::e_explain(ErrorType::HTTPStatus(404), "no route for host");
-//         };
-//
-//         let upstream = lb
-//             .select(b"", 256)
-//             .ok_or_else(|| Error::explain(ErrorType::HTTPStatus(502), "no healthy upstream"))?;
-//
-//         let selected_port = upstream.addr.as_inet().map(|inet| inet.port());
-//
-//         if let Some(port) = selected_port {
-//             let selected = self.state.get_backend_by_port(port);
-//             if let Some(backend) = selected {
-//                 ctx.deployment_id = Some((*backend.deployment_id).to_string());
-//             }
-//         }
-//
-//         Ok(Box::new(HttpPeer::new(upstream, false, String::new())))
-//     }
-//
-//     async fn request_filter(
-//         &self,
-//         session: &mut Session,
-//         ctx: &mut Self::CTX,
-//     ) -> Result<bool, Box<pingora::Error>> {
-//         if !self.state.path_has_active_app(session).unwrap_or(false) {
-//             session.shutdown().await;
-//             return Ok(true);
-//         }
-//
-//         if let Ok(file_found) = self.state.handle_static_app_request(session).await {
-//             if !file_found {
-//                 not_found_response(session).await?;
-//             }
-//             return Ok(true);
-//         }
-//
-//         if let Some(deployment_id) = ctx.deployment_id.clone() {
-//             self.state.increase_inflight_count(&deployment_id);
-//         }
-//
-//         Ok(false)
-//     }
-//
-//     async fn response_filter(
-//         &self,
-//         _session: &mut Session,
-//         _upstream_response: &mut ResponseHeader,
-//         ctx: &mut Self::CTX,
-//     ) -> Result<()> {
-//         if let Some(deployment_id) = ctx.deployment_id.clone() {
-//             self.state.decrease_inflight_count(&deployment_id);
-//         }
-//
-//         Ok(())
-//     }
-// }
 
 // pub struct LbHealthCheck {
 //     pub state: Arc<ProxyState>,
