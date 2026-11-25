@@ -4,25 +4,20 @@ mod state;
 mod tls;
 pub mod types;
 
-use std::{sync::Arc, time::Duration};
-
-use anyhow::Context;
-use async_trait::async_trait;
 use elevon_http::{check_port, runtime::run_async};
-use futures_util::{StreamExt, stream};
 use pingora::{
-    listeners::{TlsAccept, tls::TlsSettings},
+    listeners::tls::TlsSettings,
     proxy::http_proxy_service,
     server::{
-        RunArgs, Server, ShutdownWatch,
+        RunArgs, Server,
         configuration::{Opt, ServerConf},
     },
-    services::background::{BackgroundService, background_service},
+    services::background::background_service,
 };
 
 use crate::{
     env::ElevonEnv,
-    proxy::{routing::ProxyService, socket::SocketControl, state::ProxyState, tls::SharedTlsCert},
+    proxy::{routing::ProxyService, socket::SocketService, state::ProxyState, tls::SharedTlsCert},
 };
 
 // pub struct LbHealthCheck {
@@ -155,13 +150,8 @@ pub fn run_proxy(env: &ElevonEnv, upgrade: bool) -> anyhow::Result<()> {
         lb.add_tls_with_settings(&format!("0.0.0.0:{}", https_port), None, tls_settings);
     }
 
-    let control = background_service(
-        "socket control",
-        SocketControl {
-            state: proxy_state.clone(),
-        },
-    );
-    //
+    let control = background_service("socket control", SocketService(proxy_state.clone()));
+
     //     let lb_health_check = background_service(
     //         "lb health check",
     //         LbHealthCheck {

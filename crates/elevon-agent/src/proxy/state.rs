@@ -1,35 +1,10 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use arc_swap::ArcSwap;
-use axum::http::HeaderValue;
-use dashmap::DashMap;
-use elevon_fs::agent::{AgentPath, get_static_app_file};
-use futures_util::StreamExt;
-use pingora::{
-    Error, ErrorType,
-    http::ResponseHeader,
-    lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin},
-    proxy::Session,
-};
-use tokio::fs::File;
-use tokio_util::io::ReaderStream;
+use anyhow::Result;
 
 use crate::{
-    api::db::models::DeploymentStatus,
     env::ElevonEnv,
-    proxy::{
-        routing::ProxyRegistry,
-        tls::DynamicCert,
-        types::{BackendRuntime, DeployAppData, DrainAppData, RouteBackendRuntime},
-    },
+    proxy::{routing::ProxyRegistry, types::DeployAppData},
     socket::{Socket, SocketType, UnixClient},
 };
 
@@ -66,10 +41,7 @@ impl ProxyState {
                         return Ok(());
                     }
 
-                    tracing::info!(
-                        "Found {} running apps, upserting them...",
-                        apps.len()
-                    );
+                    tracing::info!("Found {} running apps, upserting them...", apps.len());
 
                     for app in apps {
                         self.registry.upsert(app)?;

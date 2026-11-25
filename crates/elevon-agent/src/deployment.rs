@@ -497,7 +497,7 @@ async fn activate_deployment(
         if let (Some(routing), Some(new_port)) = (&mut routing, new_port) {
             let internal_port = match &routing.config {
                 DeploymentRoutingConfig::ServerRouting(cfg) => cfg.internal_port,
-                _ => 0
+                _ => 0,
             };
 
             routing.config = DeploymentRoutingConfig::ServerRouting(DeploymentServerRouting {

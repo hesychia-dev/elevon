@@ -229,7 +229,7 @@ impl From<AppRoutingConfigPayload> for DeploymentRoutingConfig {
         match value {
             AppRoutingConfigPayload::Server(port) => Self::ServerRouting(DeploymentServerRouting {
                 internal_port: port,
-                exposed_port: 0
+                exposed_port: 0,
             }),
             AppRoutingConfigPayload::Static(static_config) => {
                 Self::StaticRouting(static_config.into())

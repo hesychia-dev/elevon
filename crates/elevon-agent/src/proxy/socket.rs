@@ -20,7 +20,7 @@ async fn run_socket_listener(state: Arc<ProxyState>) -> Result<()> {
                     //     |err| -> Box<dyn std::error::Error + Send + Sync> { err.into() },
                     // )?;
                 }
-                AgentEvent::DrainApp(route) => {
+                AgentEvent::DrainApp(_route) => {
                     // cloned_state.drain_app(route);
                 }
             }
@@ -33,16 +33,14 @@ async fn run_socket_listener(state: Arc<ProxyState>) -> Result<()> {
     Ok(())
 }
 
-pub struct SocketControl {
-    pub state: Arc<ProxyState>,
-}
+pub struct SocketService(pub Arc<ProxyState>);
 
 #[async_trait]
-impl BackgroundService for SocketControl {
+impl BackgroundService for SocketService {
     async fn start(&self, mut shutdown: ShutdownWatch) {
         tokio::select! {
             _ = shutdown.changed() => {}
-            _ = run_socket_listener(self.state.clone()) => {}
+            _ = run_socket_listener(self.0.clone()) => {}
         }
     }
 }
