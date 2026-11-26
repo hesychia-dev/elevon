@@ -20,7 +20,7 @@ use crate::{
     api::db::models::DeploymentStatus,
     env::ElevonEnv,
     proxy::{
-        routing::helpers::{error_response, extract_domain_and_path, file_response},
+        routing::helpers::{error_response, extract_domain_and_path, file_response, uri_rewrite},
         tls::DynamicCert,
         types::DeployAppData,
     },
@@ -193,6 +193,23 @@ impl ServerRoute {
             .ok_or_else(|| error_response("could not get backend port", 502))?;
 
         Ok((backend, backend_port))
+    }
+
+    fn resolve_headers(
+        &self,
+        session: &mut Session,
+        path_prefix: Option<String>,
+    ) -> pingora::Result<()> {
+        let uri = session.req_header().uri.clone();
+        let request_headers = session.req_header_mut();
+
+        let new_uri = uri_rewrite(uri, path_prefix).map_err(|e| {
+            pingora::Error::because(pingora::ErrorType::InternalError, "invalid uri", e)
+        })?;
+
+        request_headers.set_uri(new_uri);
+
+        Ok(())
     }
 }
 
@@ -372,6 +389,8 @@ impl ProxyHttp for ProxyService {
         if let RouteTarget::Server(server_route) = path_route.target.as_ref() {
             let (backend, _port) = server_route.handle_request()?;
 
+            server_route.resolve_headers(session, path_route.props.path_prefix)?;
+
             // TODO: Handle context update
 
             return Ok(Box::new(HttpPeer::new(backend, false, String::new())));
@@ -414,6 +433,30 @@ impl ProxyHttp for ProxyService {
         _ctx: &mut Self::CTX,
     ) -> pingora::Result<()> {
         // TODO: Handle inflight request count
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proxy_registry() -> ProxyRegistry {
+        let env = ElevonEnv {
+            agent_domain: "domain.com".to_string(),
+            agent_port: 3333,
+            proxy_http_port: 6188,
+            proxy_https_port: None,
+            turso_remote_url: None,
+        };
+
+        ProxyRegistry::new(&env)
+    }
+
+    #[tokio::test]
+    async fn test_server_on_path() -> Result<()> {
+        let proxy_registry = proxy_registry();
 
         Ok(())
     }

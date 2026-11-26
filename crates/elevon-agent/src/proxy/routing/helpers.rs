@@ -1,4 +1,6 @@
+use anyhow::Result;
 use axum::http::HeaderValue;
+use http::Uri;
 use pingora::{Error, ErrorType, http::ResponseHeader, proxy::Session};
 use tokio::fs::File;
 use tokio_stream::StreamExt;
@@ -66,4 +68,47 @@ pub async fn file_response(
     session.write_response_body(None, true).await?;
 
     Ok(())
+}
+
+pub fn uri_rewrite(uri: Uri, path_prefix: Option<String>) -> Result<Uri> {
+    let stripped = uri
+        .path()
+        .strip_prefix(path_prefix.as_deref().unwrap_or_default())
+        .unwrap_or(uri.path());
+
+    let path = if stripped.is_empty() { "/" } else { stripped }.to_owned();
+    let query = uri.query().map(str::to_owned);
+
+    let path_with_query = match query {
+        Some(q) => format!("{path}?{q}"),
+        None => path,
+    };
+
+    let mut parts = uri.into_parts();
+    parts.path_and_query = Some(path_with_query.parse()?);
+
+    Ok(Uri::from_parts(parts)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uri_rewrite() {
+        let uri_1 = Uri::from_static("http://test.com:80/api");
+        let rewrite_1 = uri_rewrite(uri_1, None).unwrap();
+
+        assert_eq!(rewrite_1.host(), Some("test.com"));
+        assert_eq!(rewrite_1.port().unwrap().as_u16(), 80);
+        assert_eq!(rewrite_1.path(), "/api");
+        assert_eq!(rewrite_1.query(), None);
+
+        let uri_2 = Uri::from_static("http://test.com/api?test=1234&test_2=5678");
+        let rewrite_2 = uri_rewrite(uri_2, None).unwrap();
+
+        assert_eq!(rewrite_2.host(), Some("test.com"));
+        assert_eq!(rewrite_2.path(), "/api");
+        assert_eq!(rewrite_2.query(), Some("test=1234&test_2=5678"));
+    }
 }

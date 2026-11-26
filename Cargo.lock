@@ -1308,6 +1308,7 @@ dependencies = [
  "elevon-fs",
  "elevon-http",
  "futures-util",
+ "http",
  "jiff",
  "mime_guess",
  "pingora",
