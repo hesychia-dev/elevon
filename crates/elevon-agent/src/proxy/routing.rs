@@ -155,6 +155,14 @@ trait RouteBuilder: Sized {
 }
 
 struct ServerRoute(LoadBalancer<RoundRobin>);
+
+impl std::fmt::Debug for ServerRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerRoute").finish()
+    }
+}
+
+#[derive(Debug)]
 struct StaticRoute(StaticRoutingConfig);
 
 impl RouteBuilder for ServerRoute {
@@ -261,6 +269,7 @@ impl RouteTargetBuild for AppRoutingConfigPayload {
     }
 }
 
+#[derive(Debug)]
 enum RouteTarget {
     Server(ServerRoute),
     Static(StaticRoute),
@@ -273,7 +282,7 @@ struct RouteProps {
     path_prefix: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct PathRoute {
     props: RouteProps,
     target: Arc<RouteTarget>,
@@ -291,7 +300,9 @@ impl DomainRouteTable {
                 .as_deref()
                 .unwrap_or_default();
             if let Some(remainder_path) = request_path.strip_prefix(path_prefix) {
-                return remainder_path.starts_with("/") || remainder_path.is_empty();
+                return remainder_path.starts_with("/")
+                    || remainder_path.starts_with("?")
+                    || remainder_path.is_empty();
             }
             false
         })
@@ -450,14 +461,136 @@ mod tests {
             proxy_https_port: None,
             turso_remote_url: None,
         };
-
         ProxyRegistry::new(&env)
     }
 
+    fn populate_test_routes(proxy_registry: &ProxyRegistry) {
+        proxy_registry
+            .upsert(DeployAppData {
+                app_id: "none".to_string(),
+                deployment_id: "none".to_string(),
+                status: DeploymentStatus::Active,
+                container_id: Some("none".to_string()),
+                routing: Some(AppRoutingPayload {
+                    domain: "test.com".to_string(),
+                    path_prefix: None,
+                    tls: None,
+                    config: AppRoutingConfigPayload::Server(3000),
+                }),
+            })
+            .unwrap();
+
+        proxy_registry
+            .upsert(DeployAppData {
+                app_id: "test".to_string(),
+                deployment_id: "test".to_string(),
+                status: DeploymentStatus::Active,
+                container_id: Some("test".to_string()),
+                routing: Some(AppRoutingPayload {
+                    domain: "test.com".to_string(),
+                    path_prefix: Some("/test".to_string()),
+                    tls: None,
+                    config: AppRoutingConfigPayload::Server(3000),
+                }),
+            })
+            .unwrap();
+
+        proxy_registry
+            .upsert(DeployAppData {
+                app_id: "testing".to_string(),
+                deployment_id: "testing".to_string(),
+                status: DeploymentStatus::Active,
+                container_id: Some("testing".to_string()),
+                routing: Some(AppRoutingPayload {
+                    domain: "test.com".to_string(),
+                    path_prefix: Some("/testing".to_string()),
+                    tls: None,
+                    config: AppRoutingConfigPayload::Server(3001),
+                }),
+            })
+            .unwrap();
+
+        proxy_registry
+            .upsert(DeployAppData {
+                app_id: "testing-api".to_string(),
+                deployment_id: "testing-api".to_string(),
+                status: DeploymentStatus::Active,
+                container_id: Some("testing-api".to_string()),
+                routing: Some(AppRoutingPayload {
+                    domain: "test.com".to_string(),
+                    path_prefix: Some("/testing/api".to_string()),
+                    tls: None,
+                    config: AppRoutingConfigPayload::Server(3001),
+                }),
+            })
+            .unwrap();
+    }
+
     #[tokio::test]
-    async fn test_server_on_path() -> Result<()> {
+    async fn test_server_on_path() {
         let proxy_registry = proxy_registry();
 
-        Ok(())
+        populate_test_routes(&proxy_registry);
+
+        let req_1 = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "")
+            .unwrap();
+
+        assert_eq!(req_1.props.app_id, "none".to_string());
+        assert_eq!(req_1.props.path_prefix, None);
+
+        let req_2 = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "/testing/test")
+            .unwrap();
+
+        assert_eq!(req_2.props.app_id, "testing".to_string());
+        assert_eq!(req_2.props.path_prefix, Some("/testing".to_string()));
+
+        let fallback_route = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "/aaaaaaasafffd")
+            .unwrap();
+
+        assert_eq!(fallback_route.props.app_id, "none".to_string());
+        assert_eq!(fallback_route.props.path_prefix, None);
+
+        let query_params_req = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "/test?v=123123")
+            .unwrap();
+
+        assert_eq!(query_params_req.props.app_id, "test".to_string());
+        assert_eq!(
+            query_params_req.props.path_prefix,
+            Some("/test".to_string())
+        );
+
+        let exact_path_req = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "/test")
+            .unwrap();
+
+        assert_eq!(exact_path_req.props.app_id, "test".to_string());
+        assert_eq!(exact_path_req.props.path_prefix, Some("/test".to_string()));
+
+        let testing_api_req = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "/testing/api/users")
+            .unwrap();
+
+        assert_eq!(testing_api_req.props.app_id, "testing-api".to_string());
+        assert_eq!(
+            testing_api_req.props.path_prefix,
+            Some("/testing/api".to_string())
+        );
+
+        let boundary_case_req = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "/testinghsjdfhsjdhfshjfd")
+            .unwrap();
+
+        assert_eq!(boundary_case_req.props.app_id, "none".to_string());
     }
 }

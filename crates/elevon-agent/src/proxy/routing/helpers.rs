@@ -104,8 +104,8 @@ mod tests {
         assert_eq!(rewrite_1.path(), "/api");
         assert_eq!(rewrite_1.query(), None);
 
-        let uri_2 = Uri::from_static("http://test.com/api?test=1234&test_2=5678");
-        let rewrite_2 = uri_rewrite(uri_2, None).unwrap();
+        let uri_2 = Uri::from_static("http://test.com/test/api?test=1234&test_2=5678");
+        let rewrite_2 = uri_rewrite(uri_2, Some("/test".to_string())).unwrap();
 
         assert_eq!(rewrite_2.host(), Some("test.com"));
         assert_eq!(rewrite_2.path(), "/api");
