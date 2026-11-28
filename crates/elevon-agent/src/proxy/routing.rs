@@ -1,3 +1,4 @@
+mod drain;
 mod helpers;
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -10,7 +11,6 @@ use elevon_contracts::deploy::{
 };
 use elevon_fs::agent::{AgentPath, get_static_app_file};
 use pingora::{
-    http::ResponseHeader,
     lb::{Backend, LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin},
     proxy::{ProxyHttp, Session},
     upstreams::peer::HttpPeer,
@@ -22,7 +22,7 @@ use crate::{
     proxy::{
         routing::helpers::{error_response, extract_domain_and_path, file_response, uri_rewrite},
         tls::DynamicCert,
-        types::DeployAppData,
+        types::{BackendRuntime, DeployAppData},
     },
 };
 
@@ -162,9 +162,6 @@ impl std::fmt::Debug for ServerRoute {
     }
 }
 
-#[derive(Debug)]
-struct StaticRoute(StaticRoutingConfig);
-
 impl RouteBuilder for ServerRoute {
     type BuildProps = Vec<SocketAddr>;
 
@@ -176,14 +173,6 @@ impl RouteBuilder for ServerRoute {
         lb.parallel_health_check = true;
 
         Ok(Self(lb))
-    }
-}
-
-impl RouteBuilder for StaticRoute {
-    type BuildProps = StaticRoutingConfig;
-
-    fn build(props: Self::BuildProps) -> Result<Self> {
-        Ok(Self(props))
     }
 }
 
@@ -218,6 +207,17 @@ impl ServerRoute {
         request_headers.set_uri(new_uri);
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct StaticRoute(StaticRoutingConfig);
+
+impl RouteBuilder for StaticRoute {
+    type BuildProps = StaticRoutingConfig;
+
+    fn build(props: Self::BuildProps) -> Result<Self> {
+        Ok(Self(props))
     }
 }
 
@@ -293,17 +293,15 @@ struct DomainRouteTable(Vec<PathRoute>);
 
 impl DomainRouteTable {
     fn match_path(&self, request_path: &str) -> Option<&PathRoute> {
-        self.0.iter().find(|path_balancer| {
-            let path_prefix = path_balancer
-                .props
-                .path_prefix
-                .as_deref()
-                .unwrap_or_default();
+        self.0.iter().find(|route| {
+            let path_prefix = route.props.path_prefix.as_deref().unwrap_or_default();
+
             if let Some(remainder_path) = request_path.strip_prefix(path_prefix) {
                 return remainder_path.starts_with("/")
                     || remainder_path.starts_with("?")
                     || remainder_path.is_empty();
             }
+
             false
         })
     }
@@ -336,32 +334,58 @@ impl DomainRouteTable {
     }
 }
 
-struct DomainRegistry(ArcSwap<HashMap<String, Arc<DomainRouteTable>>>);
+struct DomainRegistry {
+    table: ArcSwap<HashMap<String, Arc<DomainRouteTable>>>,
+    runtime_map: ArcSwap<HashMap<String, Arc<BackendRuntime>>>,
+}
 
 impl DomainRegistry {
     fn new() -> Self {
-        Self(ArcSwap::from_pointee(HashMap::new()))
+        Self {
+            table: ArcSwap::from_pointee(HashMap::new()),
+            runtime_map: ArcSwap::from_pointee(HashMap::new()),
+        }
     }
 
     fn rebuild(&self, domain: &str, entries: &[RouteEntry]) -> Result<()> {
         let new_table = Arc::new(DomainRouteTable::rebuild(entries)?);
 
-        self.0.rcu(|current| {
+        self.table.rcu(|current| {
             let mut next = (**current).clone();
             next.insert(domain.to_owned(), new_table.clone());
             Arc::new(next)
+        });
+
+        self.runtime_map.rcu(|current| {
+            let mut next = (**current).clone();
+
+            for entry in entries {
+                let backend = next.get(&entry.deployment_id);
+                if backend.is_none() {
+                    next.insert(
+                        entry.deployment_id.clone(),
+                        Arc::new(BackendRuntime::default()),
+                    );
+                }
+            }
+
+            next
         });
 
         Ok(())
     }
 
     fn find_path_route(&self, domain: &str, request_path: &str) -> Option<PathRoute> {
-        let registry = self.0.load();
+        let registry = self.table.load();
         let table = registry.get(domain)?;
 
         let path_route = table.clone().match_path(request_path)?.clone();
 
         Some(path_route)
+    }
+
+    fn get_runtime(&self, deployment_id: &str) -> Option<Arc<BackendRuntime>> {
+        self.runtime_map.load().get(deployment_id).cloned()
     }
 }
 
@@ -369,7 +393,7 @@ pub struct ProxyService(pub Arc<ProxyRegistry>);
 
 #[derive(Debug, Default)]
 pub struct RequestCtx {
-    pub deployment_id: Option<String>,
+    backend_runtime: Option<Arc<BackendRuntime>>,
 }
 
 #[async_trait]
@@ -402,8 +426,6 @@ impl ProxyHttp for ProxyService {
 
             server_route.resolve_headers(session, path_route.props.path_prefix)?;
 
-            // TODO: Handle context update
-
             return Ok(Box::new(HttpPeer::new(backend, false, String::new())));
         }
 
@@ -416,7 +438,7 @@ impl ProxyHttp for ProxyService {
     async fn request_filter(
         &self,
         session: &mut Session,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> pingora::Result<bool, Box<pingora::Error>> {
         let (domain, path) = extract_domain_and_path(session)?;
 
@@ -432,20 +454,27 @@ impl ProxyHttp for ProxyService {
             return Ok(true);
         }
 
-        // TODO: Handle inflight request count
+        let backend = self
+            .0
+            .domain_registry
+            .get_runtime(&path_route.props.deployment_id)
+            .ok_or_else(|| error_response("server runtime not found", 500))?;
+
+        backend.increase_count();
+        ctx.backend_runtime = Some(backend);
 
         Ok(false)
     }
 
-    async fn response_filter(
+    async fn logging(
         &self,
         _session: &mut Session,
-        _upstream_response: &mut ResponseHeader,
-        _ctx: &mut Self::CTX,
-    ) -> pingora::Result<()> {
-        // TODO: Handle inflight request count
-
-        Ok(())
+        _e: Option<&pingora::Error>,
+        ctx: &mut Self::CTX,
+    ) {
+        if let Some(backend) = ctx.backend_runtime.take() {
+            backend.decrease_count();
+        }
     }
 }
 
@@ -526,8 +555,8 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn test_server_on_path() {
+    #[test]
+    fn test_server_on_path() {
         let proxy_registry = proxy_registry();
 
         populate_test_routes(&proxy_registry);
@@ -592,5 +621,47 @@ mod tests {
             .unwrap();
 
         assert_eq!(boundary_case_req.props.app_id, "none".to_string());
+    }
+
+    #[test]
+    fn test_route_statuses() {
+        let proxy_registry = proxy_registry();
+
+        proxy_registry
+            .upsert(DeployAppData {
+                app_id: "draining".to_string(),
+                deployment_id: "draining".to_string(),
+                status: DeploymentStatus::Active,
+                container_id: None,
+                routing: Some(AppRoutingPayload {
+                    domain: "test.com".to_string(),
+                    path_prefix: Some("/api".to_string()),
+                    tls: None,
+                    config: AppRoutingConfigPayload::Server(3000),
+                }),
+            })
+            .unwrap();
+
+        // proxy_registry
+        //     .upsert(DeployAppData {
+        //         app_id: "active".to_string(),
+        //         deployment_id: "active".to_string(),
+        //         status: DeploymentStatus::Active,
+        //         container_id: None,
+        //         routing: Some(AppRoutingPayload {
+        //             domain: "test.com".to_string(),
+        //             path_prefix: Some("/api".to_string()),
+        //             tls: None,
+        //             config: AppRoutingConfigPayload::Server(3001),
+        //         }),
+        //     })
+        //     .unwrap();
+
+        let req = proxy_registry
+            .domain_registry
+            .find_path_route("test.com", "/api")
+            .unwrap();
+
+        assert_eq!(req.props.app_id, "active".to_string());
     }
 }
