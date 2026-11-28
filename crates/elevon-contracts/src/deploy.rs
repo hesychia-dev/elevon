@@ -6,10 +6,12 @@ use anyhow::Result;
 use bollard::plugin::RestartPolicyNameEnum;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use strum_macros::{Display, EnumString};
 
-use crate::deploy::config::{AppHealthCheckConfig, AppRoutingPayload};
+use crate::deploy::config::{
+    AppHealthCheckConfig, AppRoutingConfig, StaticRoutingConfig, TlsConfig,
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -138,6 +140,46 @@ pub struct AppRuntimeOptions {
     pub network: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum AppRoutingConfigPayload {
+    Server(u16),
+    Static(StaticRoutingConfig),
+}
+
+pub trait AppRoutingConfigTrait {
+    type StaticConfig;
+
+    fn port(&self) -> Option<u16>;
+    fn static_config(&self) -> Option<Self::StaticConfig>;
+}
+
+impl AppRoutingConfigTrait for AppRoutingConfigPayload {
+    type StaticConfig = StaticRoutingConfig;
+
+    fn port(&self) -> Option<u16> {
+        match self {
+            Self::Server(port) => Some(port.clone()),
+            Self::Static(_) => None,
+        }
+    }
+
+    fn static_config(&self) -> Option<Self::StaticConfig> {
+        match self {
+            Self::Static(static_config) => Some(static_config.clone()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppRoutingPayload {
+    pub domain: String,
+    #[serde(default, deserialize_with = "deserialize_stripped_prefix")]
+    pub path_prefix: Option<String>,
+    pub tls: Option<TlsConfig>,
+    pub config: AppRoutingConfigPayload,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppPayload {
@@ -221,6 +263,35 @@ impl RegistryVars {
             password,
         })
     }
+}
+
+impl TryFrom<&AppRoutingConfig> for AppRoutingPayload {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &AppRoutingConfig) -> std::prelude::v1::Result<Self, Self::Error> {
+        let config = match (value.static_config.as_ref(), value.port.as_ref()) {
+            (Some(static_config), None) => AppRoutingConfigPayload::Static(static_config.clone()),
+            (None, Some(port)) => AppRoutingConfigPayload::Server(port.resolve()?),
+            _ => {
+                anyhow::bail!("Invalid routing configuration");
+            }
+        };
+
+        Ok(Self {
+            domain: value.domain.clone(),
+            path_prefix: value.path_prefix.clone(),
+            tls: value.tls.clone(),
+            config,
+        })
+    }
+}
+
+fn deserialize_stripped_prefix<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    Ok(opt.map(|prefix| prefix.trim_end_matches('/').to_string()))
 }
 
 #[cfg(test)]

@@ -429,19 +429,19 @@ pub fn remove_app_files(options: AppEnvOptions) -> Result<()> {
 
 pub fn get_static_app_file(
     static_dir: &AgentPath,
-    original_path: &str,
+    remainded_path: &str,
     directory_name: &str,
     index: &str,
 ) -> Option<PathBuf> {
-    let clean_path = original_path.strip_prefix("/").unwrap_or(original_path);
+    let clean_path = remainded_path.strip_prefix("/").unwrap_or(remainded_path);
     let clean_directory = directory_name.strip_prefix("/").unwrap_or(directory_name);
     let base = static_dir.resolve().join(clean_directory);
 
-    let file_path = if original_path == "/" {
+    let file_path = if remainded_path == "/" {
         base.join(index)
     } else {
         let path = base.join(clean_path);
-        if original_path.ends_with('/') || !clean_path.contains('.') {
+        if remainded_path.ends_with('/') || !clean_path.contains('.') {
             path.join("index.html")
         } else {
             path

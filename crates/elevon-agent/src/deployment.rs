@@ -15,8 +15,9 @@ use bollard::{
     },
 };
 use elevon_contracts::deploy::{
-    AppPayload, AppRole, AppRollbackPayload, AppRuntimeOptions, StreamEvent, TlsType,
-    config::{AppHealthCheckConfig, AppRoutingPayload, StaticConfig},
+    AppPayload, AppRole, AppRollbackPayload, AppRoutingConfigTrait, AppRoutingPayload,
+    AppRuntimeOptions, StreamEvent, TlsType,
+    config::{AppHealthCheckConfig, StaticRoutingConfig},
 };
 use elevon_fs::agent::{
     AgentPath, AppEnvOptions,
@@ -31,7 +32,10 @@ use uuid::Uuid;
 
 use crate::{
     api::{
-        db::models::{App, Deployment, DeploymentStatus},
+        db::models::{
+            App, Deployment, DeploymentStatus,
+            deployment::{DeploymentRoutingConfig, DeploymentServerRouting},
+        },
         state::SharedApiState,
         stream::{StreamSender, emit},
     },
@@ -128,25 +132,20 @@ impl DeploymentService {
             AppRoleDb::Worker => AppRole::Worker,
         };
 
-        let routing = deployment
-            .routing
-            .as_ref()
-            .map(|routing| routing.container_payload());
+        let routing = deployment.routing.as_ref().map(AppRoutingPayload::from);
 
         if role == AppRole::Web
-            && routing.as_ref().is_some_and(|routing| {
-                routing.static_files.is_none()
-                    && (routing.port.is_none() || routing.port == Some(0))
-            })
+            && routing
+                .as_ref()
+                .is_some_and(|r| r.config.port().is_none() && r.config.static_config().is_none())
         {
             bail!("Cannot roll back web deployment: original container port is unavailable");
         }
 
-        let is_static = routing
+        let vars = if routing
             .as_ref()
-            .is_some_and(|routing| routing.static_files.is_some());
-
-        let vars = if !is_static {
+            .is_some_and(|r| r.config.static_config().is_none())
+        {
             let app_id = deployment.app_id.to_string();
             let deployment_id = deployment.id.to_string();
             let options = AppEnvOptions::app(app_id.clone(), deployment_id.clone());
@@ -226,10 +225,7 @@ async fn deploy(
         bail!("Web must have routing configuration");
     }
 
-    if let Some(routing) = &app_config.routing
-        && routing.static_files.is_none()
-        && (routing.port.is_none() || routing.port == Some(0))
-    {
+    if app_config.routing.is_none() {
         bail!("A web container requires a valid container port");
     }
 
@@ -337,7 +333,7 @@ async fn rollback_deployment(
     let is_static = app_config
         .routing
         .as_ref()
-        .is_some_and(|routing| routing.static_files.is_some());
+        .is_some_and(|routing| routing.config.static_config().is_some());
 
     let mut app_vars = app_config.vars.clone();
 
@@ -416,7 +412,10 @@ async fn drain_previous(
                 .routing
                 .as_ref()
                 .map(|routing| routing.domain.clone()),
-            port: previous.routing.as_ref().and_then(|routing| routing.port),
+            port: previous
+                .routing
+                .as_ref()
+                .and_then(|routing| routing.config.port()),
         };
 
         service
@@ -460,12 +459,25 @@ async fn activate_deployment(
 ) -> Result<()> {
     let mut db = service.db.clone();
 
-    let is_static = app_config
+    let static_config = app_config
         .routing
         .as_ref()
-        .is_some_and(|routing| routing.static_files.is_some());
+        .and_then(|routing| routing.config.static_config());
 
-    if !is_static {
+    if let Some(static_config) = static_config {
+        let mut routing = deployment.routing.clone();
+
+        if let Some(routing) = &mut routing {
+            routing.config = DeploymentRoutingConfig::StaticRouting(static_config.into());
+        }
+
+        deployment
+            .update()
+            .routing(routing)
+            .status(DeploymentStatus::Active)
+            .exec(&mut db)
+            .await?;
+    } else {
         let new_port = match app_config.role {
             AppRole::Web => Some(get_free_port().await?),
             _ => None,
@@ -482,8 +494,17 @@ async fn activate_deployment(
 
         let mut routing = deployment.routing.clone();
 
-        if let Some(routing) = &mut routing {
-            routing.port = new_port;
+        if let (Some(routing), Some(new_port)) = (&mut routing, new_port) {
+            let internal_port = match &routing.config {
+                DeploymentRoutingConfig::ServerRouting(cfg) => cfg.internal_port,
+                _ => 0,
+            };
+
+            routing.config = DeploymentRoutingConfig::ServerRouting(DeploymentServerRouting {
+                // TODO: Need to use the current one or just not touch it
+                internal_port,
+                exposed_port: new_port,
+            });
         }
 
         deployment
@@ -507,19 +528,6 @@ async fn activate_deployment(
         deployment
             .update()
             .status(deployment_status)
-            .exec(&mut db)
-            .await?;
-    } else {
-        let mut routing = deployment.routing.clone();
-
-        if let Some(routing) = &mut routing {
-            routing.port = None;
-        }
-
-        deployment
-            .update()
-            .routing(routing)
-            .status(DeploymentStatus::Active)
             .exec(&mut db)
             .await?;
     }
@@ -552,7 +560,7 @@ async fn prepare_app_files(
             write_tls_file(tls.key.as_bytes(), TlsType::Key, app_env_options.clone())?;
         }
 
-        if let Some(static_files) = &routing.static_files {
+        if let Some(static_config) = &routing.config.static_config() {
             handle_static_app_deployment(
                 &docker,
                 resources,
@@ -560,7 +568,7 @@ async fn prepare_app_files(
                 app_name,
                 deployment.app_id.to_string(),
                 deployment.id.to_string(),
-                static_files,
+                static_config,
             )
             .await?;
 
@@ -593,7 +601,7 @@ async fn send_upsert_route(
         deployment_id: deployment.id.to_string(),
         container_id: deployment.container_id.clone(),
         status: DeploymentStatus::Active,
-        routing: deployment.routing.as_ref().map(AppRoutingPayload::from),
+        routing: deployment.routing.as_ref().map(|r| r.into()),
     };
 
     service
@@ -676,7 +684,7 @@ async fn handle_static_app_deployment(
     app_name: &str,
     app_id: String,
     deployment_id: String,
-    static_config: &StaticConfig,
+    static_config: &StaticRoutingConfig,
 ) -> Result<()> {
     let out_dir = AgentPath::AppStaticDir(app_id, deployment_id.clone()).ensure_parent_dir()?;
 

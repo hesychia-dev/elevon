@@ -1,10 +1,12 @@
 use std::{
-    path::PathBuf,
-    sync::{Arc, atomic::AtomicUsize},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Instant,
 };
 
-use elevon_contracts::deploy::config::AppRoutingPayload;
+use elevon_contracts::deploy::AppRoutingPayload;
 use serde::{Deserialize, Serialize};
 
 use crate::api::db::models::DeploymentStatus;
@@ -33,23 +35,22 @@ pub struct DrainAppData {
     pub port: Option<u16>,
 }
 
-#[derive(Debug, Default)]
-pub struct RouteBackendRuntime {
-    pub port: u16,
+#[derive(Debug, Clone, Default)]
+pub struct BackendRuntime {
     pub inflight: Arc<AtomicUsize>,
     pub drain_started_at: Option<Instant>,
 }
 
-#[derive(Debug, Default)]
-pub struct BackendRuntime {
-    pub deployment_id: String,
-    pub container_id: Option<String>,
-    pub status: DeploymentStatus,
-    pub route: Option<RouteBackendRuntime>,
-}
+impl BackendRuntime {
+    pub fn increase_count(&self) {
+        self.inflight.fetch_add(1, Ordering::Relaxed);
+    }
 
-#[derive(Debug)]
-pub struct StaticAppResponseData {
-    pub file_path: PathBuf,
-    pub mime_type: String,
+    pub fn decrease_count(&self) {
+        self.inflight.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub fn mark_as_draining(&mut self) {
+        self.drain_started_at = Some(Instant::now());
+    }
 }

@@ -15,7 +15,7 @@ use bollard::{
     query_parameters::{CreateContainerOptionsBuilder, CreateImageOptionsBuilder},
 };
 use elevon_contracts::deploy::{
-    AppPayload, RegistryVars, StreamEvent, config::AppHealthCheckConfig,
+    AppPayload, AppRoutingConfigTrait, RegistryVars, StreamEvent, config::AppHealthCheckConfig,
 };
 use futures_util::TryStreamExt;
 use tokio::time::Instant;
@@ -120,9 +120,10 @@ pub(super) async fn create_container(
 
     let mut port_bindings = PortMap::new();
 
-    if let Some(routing) = &app_config.routing
-        && let (Some(internal_port), Some(exposed_port)) = (routing.port, new_port)
-    {
+    if let (Some(internal_port), Some(exposed_port)) = (
+        app_config.routing.as_ref().and_then(|r| r.config.port()),
+        new_port,
+    ) {
         port_bindings.insert(
             format!("{}/tcp", internal_port),
             Some(vec![PortBinding {

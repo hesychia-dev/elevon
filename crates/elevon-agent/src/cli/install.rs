@@ -120,7 +120,7 @@ pub async fn run_install(cli_args: CliArgs, args: InstallArgs) -> Result<()> {
     let config = Config::from_file(cli_args.config).context("failed to load config")?;
     config.setup().context("failed to setup configuration")?;
 
-    ElevonEnv::new(config).context("failed to init agent env")?;
+    ElevonEnv::setup(config).context("failed to init agent env")?;
 
     let mut db = AgentDb::new(None)
         .await

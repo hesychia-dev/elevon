@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bollard::query_parameters::RemoveContainerOptions;
-use elevon_contracts::deploy::config::AppRoutingPayload;
+use elevon_contracts::deploy::AppRoutingPayload;
 use elevon_fs::agent::{AgentPath, AppEnvOptions, remove_app_files};
 use tokio::sync::RwLock;
 
 use crate::api::db::AgentDb;
+use crate::api::db::models::deployment::DeploymentRoutingConfig;
 use crate::api::db::models::{Deployment, DeploymentStatus};
 use crate::deployment::container::check_container_state;
 use crate::env::ElevonEnv;
@@ -107,16 +108,18 @@ impl ApiState {
         for mut deployment in deployments {
             let app = deployment.app.get();
 
-            let deployment_status = if let Some(container_id) = &deployment.container_id {
-                check_container_state(&self.docker, container_id, false).await
-            } else if deployment
+            let container_id = deployment.container_id.as_ref();
+            let is_static_deployment = deployment
                 .routing
                 .as_ref()
-                .is_some_and(|routing| routing.static_files.is_some())
-            {
-                deployment.status.clone()
-            } else {
-                DeploymentStatus::Failed
+                .is_some_and(|r| matches!(r.config, DeploymentRoutingConfig::StaticRouting(_)));
+
+            let deployment_status = match (container_id, is_static_deployment) {
+                (Some(container_id), false) => {
+                    check_container_state(&self.docker, container_id, false).await
+                }
+                (None, true) => deployment.status.clone(),
+                _ => DeploymentStatus::Failed,
             };
 
             if deployment_status != DeploymentStatus::Active {

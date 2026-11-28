@@ -1113,20 +1113,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashmap"
-version = "6.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
-dependencies = [
- "cfg-if",
- "crossbeam-utils",
- "hashbrown 0.14.5",
- "lock_api 0.4.14",
- "once_cell",
- "parking_lot_core 0.9.12",
-]
-
-[[package]]
 name = "deadpool"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1302,12 +1288,12 @@ dependencies = [
  "bollard",
  "bytes",
  "clap",
- "dashmap 6.2.1",
  "elevon-config",
  "elevon-contracts",
  "elevon-fs",
  "elevon-http",
  "futures-util",
+ "http",
  "jiff",
  "mime_guess",
  "pingora",
@@ -1482,7 +1468,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1924,9 +1910,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.17.1"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+checksum = "735eaa21a6a5ffb2e84362faaeb90c05ba8e19797ca30428478cb6ea3a4921bc"
 dependencies = [
  "allocator-api2 0.2.21",
  "equivalent",
@@ -1948,7 +1934,7 @@ version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
 dependencies = [
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
 ]
 
 [[package]]
@@ -2374,7 +2360,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
  "serde",
  "serde_core",
 ]
@@ -2745,7 +2731,7 @@ version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
 dependencies = [
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
 ]
 
 [[package]]
@@ -2894,7 +2880,7 @@ version = "0.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fad8f1a552070f6ba5f60f25e880f7b6daeda8fe138f589345141d31a21a3bb"
 dependencies = [
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
  "indexmap 2.14.2",
  "itoa",
  "libm",
@@ -2912,7 +2898,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3341,7 +3327,7 @@ dependencies = [
  "arrayvec",
  "async-channel",
  "flurry",
- "hashbrown 0.17.1",
+ "hashbrown 0.16.1",
  "log",
  "parking_lot 0.13.0",
  "rand 0.8.8",
@@ -3355,7 +3341,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f9276b751bf2f908d24c73b8f23fcf05c2102fe373513457deb8868e17ef238"
 dependencies = [
  "crossbeam-queue",
- "dashmap 5.5.3",
+ "dashmap",
  "futures",
  "log",
  "lru",
@@ -3654,7 +3640,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4048,7 +4034,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4116,7 +4102,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4795,7 +4781,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4923,7 +4909,7 @@ dependencies = [
  "bit-set",
  "by_address",
  "deadpool",
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
  "index_vec",
  "indexmap 2.14.2",
  "inventory",
@@ -4953,7 +4939,7 @@ dependencies = [
  "clap",
  "console",
  "dialoguer",
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
  "jiff",
  "rand 0.10.3",
  "serde",
@@ -4972,7 +4958,7 @@ dependencies = [
  "bit-set",
  "fluent-uri",
  "form_urlencoded",
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
  "heck",
  "indexmap 2.14.2",
  "jiff",
@@ -5010,7 +4996,7 @@ checksum = "b6cdb083715b23faddc3b667151cfda8b02feac02e0066acd933d8f8028fce4c"
 dependencies = [
  "async-trait",
  "fallible-iterator 0.2.0",
- "hashbrown 0.17.1",
+ "hashbrown 0.17.2",
  "jiff",
  "lru",
  "postgres-protocol",
@@ -6016,7 +6002,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

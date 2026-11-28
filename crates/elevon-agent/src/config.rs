@@ -31,40 +31,6 @@ impl ProxyConfig {
     }
 }
 
-fn coerce_string_port<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum StringOrInt {
-        String(String),
-        Int(u64),
-    }
-
-    match StringOrInt::deserialize(deserializer)? {
-        StringOrInt::String(s) => Ok(s),
-        StringOrInt::Int(i) => Ok(i.to_string()),
-    }
-}
-
-pub fn parse_port(ports: String) -> Result<(u16, Option<u16>)> {
-    let mut parts = ports.split(":");
-
-    let http = parts
-        .next()
-        .context("Missing HTTP port")?
-        .parse::<u16>()
-        .context("Invalid u16 for HTTP port")?;
-
-    let https = parts
-        .next()
-        .map(|s| s.parse::<u16>().context("Invalid u16 for HTTPS port"))
-        .transpose()?;
-
-    Ok((http, https))
-}
-
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub agent: AgentConfig,
@@ -90,6 +56,40 @@ impl Config {
 }
 
 impl ElevonConfig for Config {}
+
+pub fn parse_port(ports: String) -> Result<(u16, Option<u16>)> {
+    let mut parts = ports.split(":");
+
+    let http = parts
+        .next()
+        .context("Missing HTTP port")?
+        .parse::<u16>()
+        .context("Invalid u16 for HTTP port")?;
+
+    let https = parts
+        .next()
+        .map(|s| s.parse::<u16>().context("Invalid u16 for HTTPS port"))
+        .transpose()?;
+
+    Ok((http, https))
+}
+
+fn coerce_string_port<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrInt {
+        String(String),
+        Int(u64),
+    }
+
+    match StringOrInt::deserialize(deserializer)? {
+        StringOrInt::String(s) => Ok(s),
+        StringOrInt::Int(i) => Ok(i.to_string()),
+    }
+}
 
 #[cfg(test)]
 mod tests {

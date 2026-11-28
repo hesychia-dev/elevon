@@ -1,0 +1,114 @@
+use anyhow::Result;
+use axum::http::HeaderValue;
+use http::Uri;
+use pingora::{Error, ErrorType, http::ResponseHeader, proxy::Session};
+use tokio::fs::File;
+use tokio_stream::StreamExt;
+use tokio_util::io::ReaderStream;
+
+pub fn error_response(message: impl Into<String>, status_code: u16) -> Box<Error> {
+    Error::explain(ErrorType::HTTPStatus(status_code), message.into())
+}
+
+fn extract_domain(host: &HeaderValue) -> Option<&str> {
+    let host_str = host.to_str().ok()?;
+
+    let mut parts = host_str.rsplitn(2, ':');
+    let first_part = parts.next()?;
+
+    if let Some(domain_part) = parts.next() {
+        // If there was a colon, the second part yielded by rsplitn is the domain
+        Some(domain_part)
+    } else {
+        // If there was no colon, the whole string is the domain
+        Some(first_part)
+    }
+}
+
+pub fn extract_domain_and_path(session: &Session) -> pingora::Result<(String, String)> {
+    let host = session
+        .req_header()
+        .headers
+        .get("Host")
+        .ok_or_else(|| error_response("no Host header", 502))?;
+
+    let domain = extract_domain(host)
+        .ok_or_else(|| error_response("could not get domain out of host", 502))?;
+
+    let path = session.req_header().uri.path();
+
+    Ok((domain.to_string(), path.to_string()))
+}
+
+pub async fn file_response(
+    session: &mut Session,
+    file_path: std::path::PathBuf,
+) -> pingora::Result<()> {
+    let file = File::open(&file_path)
+        .await
+        .map_err(|_| error_response("could not open requested file", 500))?;
+
+    let mut header = ResponseHeader::build(200, None)?;
+    let mime_guess = mime_guess::from_path(&file_path)
+        .first_raw()
+        .unwrap_or("application/octet-stream");
+
+    header.insert_header("Content-Type", mime_guess)?;
+
+    session
+        .write_response_header(Box::new(header), false)
+        .await?;
+
+    let mut file_stream = ReaderStream::new(file);
+    while let Some(chunk) = file_stream.next().await {
+        let chunk = chunk.map_err(|_| error_response("failed to stream a file chunk", 500))?;
+        session.write_response_body(Some(chunk), false).await?;
+    }
+
+    session.write_response_body(None, true).await?;
+
+    Ok(())
+}
+
+pub fn uri_rewrite(uri: Uri, path_prefix: Option<String>) -> Result<Uri> {
+    let stripped = uri
+        .path()
+        .strip_prefix(path_prefix.as_deref().unwrap_or_default())
+        .unwrap_or(uri.path());
+
+    let path = if stripped.is_empty() { "/" } else { stripped }.to_owned();
+    let query = uri.query().map(str::to_owned);
+
+    let path_with_query = match query {
+        Some(q) => format!("{path}?{q}"),
+        None => path,
+    };
+
+    let mut parts = uri.into_parts();
+    parts.path_and_query = Some(path_with_query.parse()?);
+
+    Ok(Uri::from_parts(parts)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uri_rewrite() {
+        let uri_1 = Uri::from_static("http://test.com:80/api");
+        let rewrite_1 = uri_rewrite(uri_1, None).unwrap();
+
+        assert_eq!(rewrite_1.host(), Some("test.com"));
+        assert_eq!(rewrite_1.port().unwrap().as_u16(), 80);
+        assert_eq!(rewrite_1.path(), "/api");
+        assert_eq!(rewrite_1.query(), None);
+
+        let uri_2 = Uri::from_static("http://test.com/test/api?test=1234&test_2=5678");
+        let rewrite_2 = uri_rewrite(uri_2, Some("/test".to_string())).unwrap();
+
+        assert_eq!(rewrite_2.host(), Some("test.com"));
+        assert_eq!(rewrite_2.path(), "/api");
+        assert_eq!(rewrite_2.query(), Some("test=1234&test_2=5678"));
+    }
+}
